@@ -4,13 +4,62 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// handleKeys routes keyboard events to the correct panel handler.
+// handleKeys routes keyboard events to global handlers or panel-specific handlers.
 func (m *Model) handleKeys(msg tea.KeyMsg) tea.Cmd {
 	// Global quit — always available.
 	if matchesKey(msg, keys.Quit...) {
 		m.quitting = true
 		m.cancelStream()
 		return tea.Quit
+	}
+
+	// Global panel navigation: 1 (Containers), 2 (Logs), Tab (toggle)
+	if matchesKey(msg, keys.Panel1...) {
+		m.activePanel = ListPanel
+		m.refreshListViewport()
+		return nil
+	}
+	if matchesKey(msg, keys.Panel2...) {
+		c := m.selectedContainer()
+		if c != nil && m.stream == nil {
+			m.activePanel = LogsPanel
+			m.logLines = nil
+			m.refreshLogViewportContent()
+			return openLogStreamCmd(m.provider, c.ID)
+		}
+		m.activePanel = LogsPanel
+		return nil
+	}
+	if matchesKey(msg, keys.Tab...) {
+		if m.activePanel == ListPanel {
+			c := m.selectedContainer()
+			if c != nil && m.stream == nil {
+				m.activePanel = LogsPanel
+				m.logLines = nil
+				m.refreshLogViewportContent()
+				return openLogStreamCmd(m.provider, c.ID)
+			}
+			m.activePanel = LogsPanel
+		} else {
+			m.activePanel = ListPanel
+		}
+		return nil
+	}
+
+	// Panel resize: < (or ,) moves divider left, > (or .) moves divider right
+	if matchesKey(msg, keys.ResizeLeft...) {
+		m.leftPanelRatio -= resizeStep
+		if m.leftPanelRatio < minLeftPanelRatio {
+			m.leftPanelRatio = minLeftPanelRatio
+		}
+		return m.handleResize(tea.WindowSizeMsg{Width: m.width, Height: m.height})
+	}
+	if matchesKey(msg, keys.ResizeRight...) {
+		m.leftPanelRatio += resizeStep
+		if m.leftPanelRatio > maxLeftPanelRatio {
+			m.leftPanelRatio = maxLeftPanelRatio
+		}
+		return m.handleResize(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 	}
 
 	if m.activePanel == LogsPanel {

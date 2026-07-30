@@ -29,7 +29,11 @@ const (
 	spinnerTickInterval = 80 * time.Millisecond
 	splashDuration      = 1500 * time.Millisecond
 
-	defaultRatio   = 0.40
+	defaultRatio      = 0.40
+	minLeftPanelRatio = 0.20
+	maxLeftPanelRatio = 0.80
+	resizeStep        = 0.05
+
 	minPanelWidth  = 20
 	minPanelHeight = 5
 )
@@ -73,8 +77,9 @@ type Model struct {
 	listViewport viewport.Model
 
 	// layout
-	width  int
-	height int
+	width          int
+	height         int
+	leftPanelRatio float64
 
 	// splash
 	showSplash  bool
@@ -95,14 +100,15 @@ type Model struct {
 func NewModel(provider domain.ContainerProvider, engineName string) Model {
 	ui.ApplyTheme("Tokyo Night")
 	return Model{
-		provider:     provider,
-		engine:       engineName,
-		activePanel:  ListPanel,
-		logViewport:  viewport.New(0, 0),
-		listViewport: viewport.New(0, 0),
-		loading:      true,
-		logFollow:    true,
-		showSplash:   true,
+		provider:       provider,
+		engine:         engineName,
+		activePanel:    ListPanel,
+		leftPanelRatio: defaultRatio,
+		logViewport:    viewport.New(0, 0),
+		listViewport:   viewport.New(0, 0),
+		loading:        true,
+		logFollow:      true,
+		showSplash:     true,
 	}
 }
 
@@ -124,7 +130,11 @@ func (m *Model) selectedContainer() *containerItem {
 }
 
 func (m Model) leftPanelWidth() int {
-	w := int(float64(m.width) * defaultRatio)
+	ratio := m.leftPanelRatio
+	if ratio <= 0 {
+		ratio = defaultRatio
+	}
+	w := int(float64(m.width) * ratio)
 	if w < minPanelWidth {
 		w = minPanelWidth
 	}

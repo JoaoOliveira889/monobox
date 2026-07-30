@@ -80,8 +80,9 @@ func (m *Model) renderRepoList(width, height int) string {
 		content = ui.SubtleStyle.Render(" No containers found.\n Make sure Docker or Podman is running.")
 	}
 
+	title := "1 Containers"
 	accent := lipgloss.Color(ui.ColorMono)
-	return m.renderTitledPanel(width, height, "Containers", content, m.activePanel == ListPanel, accent)
+	return m.renderTitledPanel(width, height, title, content, m.activePanel == ListPanel, accent)
 }
 
 // renderContainerListContent renders all container rows inside listViewport.
@@ -106,6 +107,7 @@ func (m *Model) renderContainerListContent() string {
 }
 
 // renderContainerRow renders a single container row in monogit repoLine style.
+// Shows container name on the left and status badge on the right (no parenthesized image).
 func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) string {
 	selected := index == m.cursor
 	var bgStyle lipgloss.Style
@@ -120,7 +122,7 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 		prefix = "  "
 	}
 
-	// Format right-aligned status badge
+	// Right-aligned status badge
 	var statusBadge string
 	if selected {
 		statusBadge = bgStyle.Foreground(ui.ColorBg).Bold(true).Render(statusBadgeText(c.Container, maxWidth))
@@ -131,59 +133,24 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 	prefixWidth := lipgloss.Width(prefix)
 	statusWidth := lipgloss.Width(statusBadge)
 
-	availForText := maxWidth - prefixWidth - statusWidth - 1
-	if availForText < 4 {
-		availForText = 4
+	availForName := maxWidth - prefixWidth - statusWidth - 1
+	if availForName < 3 {
+		availForName = 3
 	}
 
 	name := c.Name
-	nameWidth := lipgloss.Width(name)
+	if lipgloss.Width(name) > availForName {
+		name = truncateRunes(name, availForName)
+	}
 
-	var nameStr, imageStr string
-	if nameWidth >= availForText {
-		name = truncateRunes(name, availForText)
-		if selected {
-			nameStr = bgStyle.Foreground(ui.ColorBg).Bold(true).Render(name)
-		} else {
-			nameStr = lipgloss.NewStyle().Foreground(ui.ColorFg).Render(name)
-		}
+	var nameStr string
+	if selected {
+		nameStr = bgStyle.Foreground(ui.ColorBg).Bold(true).Render(name)
 	} else {
-		if selected {
-			nameStr = bgStyle.Foreground(ui.ColorBg).Bold(true).Render(name)
-		} else {
-			nameStr = lipgloss.NewStyle().Foreground(ui.ColorFg).Render(name)
-		}
-
-		availForImage := availForText - nameWidth - 1
-		if availForImage >= 4 {
-			maxImgLen := availForImage - 3
-			img := c.Image
-			if lipgloss.Width(img) > maxImgLen {
-				img = truncateRunes(img, maxImgLen)
-			}
-			if img != "" {
-				if selected {
-					imageStr = bgStyle.Foreground(ui.ColorBg).Render(" (") +
-						bgStyle.Foreground(ui.ColorSelected).Bold(true).Render(img) +
-						bgStyle.Foreground(ui.ColorBg).Render(")")
-				} else {
-					imageStr = lipgloss.NewStyle().Foreground(ui.ColorSubtle).Render(" (") +
-						lipgloss.NewStyle().Foreground(ui.ColorCyan).Render(img) +
-						lipgloss.NewStyle().Foreground(ui.ColorSubtle).Render(")")
-				}
-			}
-		}
+		nameStr = lipgloss.NewStyle().Foreground(ui.ColorFg).Render(name)
 	}
 
 	leftContent := prefix + nameStr
-	if imageStr != "" {
-		midSp := " "
-		if selected {
-			midSp = bgStyle.Render(" ")
-		}
-		leftContent += midSp + imageStr
-	}
-
 	leftWidth := lipgloss.Width(leftContent)
 	gapLen := maxWidth - leftWidth - statusWidth
 	if gapLen < 1 {
@@ -211,7 +178,7 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 }
 
 func statusBadgeText(c domain.Container, maxWidth int) string {
-	if maxWidth < 35 {
+	if maxWidth < 25 {
 		switch c.Status {
 		case domain.StatusRunning:
 			return "● RUN"
@@ -258,14 +225,14 @@ func (m *Model) renderDetailPanel(width, height int) string {
 	c := m.selectedContainer()
 	if c == nil {
 		content := ui.SubtleStyle.Render(" No container selected")
-		return m.renderTitledPanel(width, height, "Logs", content, false, lipgloss.Color(ui.ColorBorder))
+		return m.renderTitledPanel(width, height, "2 Logs", content, false, lipgloss.Color(ui.ColorBorder))
 	}
 
 	var title string
 	var content string
 
 	if m.activePanel == LogsPanel {
-		title = "Logs — " + c.Name
+		title = "2 Logs — " + c.Name
 		if m.logFollow {
 			title += " [follow]"
 		}
@@ -279,7 +246,7 @@ func (m *Model) renderDetailPanel(width, height int) string {
 		}
 	} else {
 		// ListPanel is active: show container detail card + recent logs preview
-		title = "Container — " + c.Name
+		title = "2 Container — " + c.Name
 
 		var cardLines []string
 		cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "NAME:", ui.ValueStyle.Render(c.Name)))
