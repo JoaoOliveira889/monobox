@@ -95,7 +95,7 @@ func (m *Model) renderContainerListContent() string {
 
 	vpWidth := m.listViewport.Width
 	if vpWidth < 10 {
-		vpWidth = m.leftPanelWidth() - 4
+		vpWidth = m.leftPanelWidth() - 3
 	}
 
 	var rows []string
@@ -120,20 +120,20 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 		prefix = "  "
 	}
 
-	// Right-aligned status badge
+	// Format right-aligned status badge
 	var statusBadge string
 	if selected {
-		statusBadge = bgStyle.Foreground(ui.ColorBg).Bold(true).Render(statusBadgeText(c.Container))
+		statusBadge = bgStyle.Foreground(ui.ColorBg).Bold(true).Render(statusBadgeText(c.Container, maxWidth))
 	} else {
-		statusBadge = statusBadgeStyled(c.Container)
+		statusBadge = statusBadgeStyled(c.Container, maxWidth)
 	}
 
 	prefixWidth := lipgloss.Width(prefix)
 	statusWidth := lipgloss.Width(statusBadge)
 
 	availForText := maxWidth - prefixWidth - statusWidth - 1
-	if availForText < 5 {
-		availForText = 5
+	if availForText < 4 {
+		availForText = 4
 	}
 
 	name := c.Name
@@ -203,13 +203,26 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 		} else {
 			row += padding
 		}
+	} else if rowWidth > maxWidth {
+		row = truncateRunes(row, maxWidth)
 	}
 
 	return row
 }
 
-// statusBadgeText produces unstyled text for selected row background.
-func statusBadgeText(c domain.Container) string {
+func statusBadgeText(c domain.Container, maxWidth int) string {
+	if maxWidth < 35 {
+		switch c.Status {
+		case domain.StatusRunning:
+			return "● RUN"
+		case domain.StatusExited:
+			return "○ OFF"
+		case domain.StatusPaused:
+			return "⏸ PAUS"
+		default:
+			return "? UNK"
+		}
+	}
 	switch c.Status {
 	case domain.StatusRunning:
 		return "● RUNNING"
@@ -224,19 +237,19 @@ func statusBadgeText(c domain.Container) string {
 	}
 }
 
-// statusBadgeStyled produces colored badge text for non-selected rows.
-func statusBadgeStyled(c domain.Container) string {
+func statusBadgeStyled(c domain.Container, maxWidth int) string {
+	text := statusBadgeText(c, maxWidth)
 	switch c.Status {
 	case domain.StatusRunning:
-		return lipgloss.NewStyle().Foreground(ui.ColorSuccess).Bold(true).Render("● RUNNING")
+		return lipgloss.NewStyle().Foreground(ui.ColorSuccess).Bold(true).Render(text)
 	case domain.StatusExited:
-		return ui.SubtleStyle.Render("○ EXITED")
+		return ui.SubtleStyle.Render(text)
 	case domain.StatusPaused:
-		return lipgloss.NewStyle().Foreground(ui.ColorWarning).Bold(true).Render("⏸ PAUSED")
+		return lipgloss.NewStyle().Foreground(ui.ColorWarning).Bold(true).Render(text)
 	case domain.StatusCreated:
-		return ui.SubtleStyle.Render("○ CREATED")
+		return ui.SubtleStyle.Render(text)
 	default:
-		return ui.SubtleStyle.Render("? UNKNOWN")
+		return ui.SubtleStyle.Render(text)
 	}
 }
 
@@ -272,7 +285,7 @@ func (m *Model) renderDetailPanel(width, height int) string {
 		cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "NAME:", ui.ValueStyle.Render(c.Name)))
 		cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "IMAGE:", ui.ValueStyle.Render(c.Image)))
 
-		statusStr := statusBadgeStyled(c.Container)
+		statusStr := statusBadgeStyled(c.Container, width)
 		if c.RunningFor != "" {
 			statusStr += ui.SubtleStyle.Render(" (" + c.RunningFor + ")")
 		}
@@ -286,8 +299,12 @@ func (m *Model) renderDetailPanel(width, height int) string {
 			cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "ID:", ui.SubtleStyle.Render(shortID)))
 		}
 
+		divWidth := width - 6
+		if divWidth < 10 {
+			divWidth = 10
+		}
 		cardLines = append(cardLines, "")
-		cardLines = append(cardLines, ui.SubtleStyle.Render("  " + strings.Repeat("─", width-6)))
+		cardLines = append(cardLines, ui.SubtleStyle.Render("  "+strings.Repeat("─", divWidth)))
 		cardLines = append(cardLines, ui.LabelStyle.Render("  ACTIONS & LOGS:"))
 		cardLines = append(cardLines, ui.SubtleStyle.Render("   • Press Enter to open live log stream"))
 		if c.IsRunning() {
@@ -305,6 +322,9 @@ func (m *Model) renderDetailPanel(width, height int) string {
 				start = 0
 			}
 			for _, line := range m.logLines[start:] {
+				if lipgloss.Width(line) > divWidth {
+					line = truncateRunes(line, divWidth)
+				}
 				cardLines = append(cardLines, ui.SubtleStyle.Render("   "+line))
 			}
 		}

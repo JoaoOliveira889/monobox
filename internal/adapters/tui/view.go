@@ -95,7 +95,9 @@ func renderBrandWordmark(compact bool) string {
 }
 
 // renderHeader matches monogit's header style:
-// brand wordmark (MonoBox 2-color) • spinner/loading • stats
+// Line 1: Brand wordmark (MonoBox 2-color) • spinner/loading • stats
+// Line 2: Status bar line (● N containers • N running • [engine] • Press q to quit)
+// Line 3: Border line (─)
 func (m *Model) renderHeader() string {
 	var brand string
 	switch {
@@ -125,8 +127,12 @@ func (m *Model) renderHeader() string {
 	statsW := lipgloss.Width(stats)
 	loadingW := lipgloss.Width(loading)
 
-	// Spacer len minus 2 for leading & trailing space paddings
-	spacerLen := m.width - brandW - statsW - loadingW - 2
+	maxW := m.width - 1
+	if maxW < 10 {
+		maxW = 10
+	}
+
+	spacerLen := maxW - brandW - statsW - loadingW - 2
 	if spacerLen < 0 {
 		spacerLen = 0
 	}
@@ -139,13 +145,13 @@ func (m *Model) renderHeader() string {
 		ui.SubtleStyle.Render(stats),
 	) + " "
 
-	if lipgloss.Width(headerLine) > m.width {
-		headerLine = truncateRunes(headerLine, m.width)
+	if lipgloss.Width(headerLine) > maxW {
+		headerLine = truncateRunes(headerLine, maxW)
 	}
 
 	border := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ui.ColorBorder)).
-		Render(strings.Repeat("─", m.width))
+		Render(strings.Repeat("─", maxW))
 
 	styledStatus := m.renderHeaderStatusBar()
 
@@ -153,15 +159,20 @@ func (m *Model) renderHeader() string {
 }
 
 func (m *Model) renderHeaderStatusBar() string {
+	maxW := m.width - 1
+	if maxW < 10 {
+		maxW = 10
+	}
+
 	if m.statusMsg != "" {
 		msg := " " + m.statusMsg
 		switch {
 		case strings.HasPrefix(m.statusMsg, "✓"):
-			return ui.StatusSuccessStyle.MaxWidth(m.width).Render(msg)
+			return ui.StatusSuccessStyle.MaxWidth(maxW).Render(msg)
 		case strings.HasPrefix(m.statusMsg, "✗"):
-			return ui.StatusErrorStyle.MaxWidth(m.width).Render(msg)
+			return ui.StatusErrorStyle.MaxWidth(maxW).Render(msg)
 		default:
-			return ui.StatusInfoStyle.MaxWidth(m.width).Render(msg)
+			return ui.StatusInfoStyle.MaxWidth(maxW).Render(msg)
 		}
 	}
 
@@ -195,7 +206,7 @@ func (m *Model) renderHeaderStatusBar() string {
 	sep := ui.SubtleStyle.Render("  •  ")
 	barText := " " + dot + " " + strings.Join(parts, sep)
 
-	return ui.SubtleStyle.MaxWidth(m.width).Render(barText)
+	return ui.SubtleStyle.MaxWidth(maxW).Render(barText)
 }
 
 // renderFooter — matches monogit's footer: key hints left, version right.

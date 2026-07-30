@@ -56,27 +56,40 @@ func (m *Model) handleResize(msg tea.WindowSizeMsg) tea.Cmd {
 	m.width = msg.Width
 	m.height = msg.Height
 
-	listInner := m.leftPanelWidth() - 2
-	if listInner < 0 {
-		listInner = 0
+	lpW := m.leftPanelWidth()
+	rpW := m.rightPanelWidth()
+	headerHeight := 3
+	footerHeight := 1
+	bodyHeight := m.height - headerHeight - footerHeight
+	if bodyHeight < 5 {
+		bodyHeight = 5
 	}
-	logsInner := m.rightPanelWidth() - 2
-	if logsInner < 0 {
-		logsInner = 0
+
+	listInnerW := lpW - 3
+	if listInnerW < 0 {
+		listInnerW = 0
 	}
-	ph := m.panelHeight()
+	logsInnerW := rpW - 3
+	if logsInnerW < 0 {
+		logsInnerW = 0
+	}
+
+	innerHeight := bodyHeight - 2
+	if innerHeight < 0 {
+		innerHeight = 0
+	}
 
 	if m.listViewport.Width == 0 {
-		m.listViewport = viewport.New(listInner, ph)
+		m.listViewport = viewport.New(listInnerW, innerHeight)
 	} else {
-		m.listViewport.Width = listInner
-		m.listViewport.Height = ph
+		m.listViewport.Width = listInnerW
+		m.listViewport.Height = innerHeight
 	}
 	if m.logViewport.Width == 0 {
-		m.logViewport = viewport.New(logsInner, ph)
+		m.logViewport = viewport.New(logsInnerW, innerHeight)
 	} else {
-		m.logViewport.Width = logsInner
-		m.logViewport.Height = ph
+		m.logViewport.Width = logsInnerW
+		m.logViewport.Height = innerHeight
 	}
 
 	m.refreshListViewport()
