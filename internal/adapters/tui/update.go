@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"bufio"
 	"fmt"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -19,6 +18,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinnerTickMsg:
 		m.spinnerFrame++
 		cmd = spinnerTickCmd()
+	case splashTickMsg:
+		if m.showSplash {
+			m.splashFrame++
+			cmd = splashTickCmd()
+		}
 	case tickMsg:
 		cmd = m.loadContainersCmd()
 	case containersLoadedMsg:
@@ -82,12 +86,14 @@ func (m *Model) handleResize(msg tea.WindowSizeMsg) tea.Cmd {
 
 func (m *Model) handleContainersLoaded(msg containersLoadedMsg) tea.Cmd {
 	m.loading = false
+	// Hide splash once containers arrive.
+	m.showSplash = false
+
 	if msg.err != nil {
-		m.setStatus(fmt.Sprintf("Error loading containers: %s", msg.err))
+		m.setStatus(fmt.Sprintf("✗ Error loading containers: %s", msg.err))
 		return tickCmd()
 	}
 
-	// Preserve cursor position by matching container ID.
 	var prevID string
 	if c := m.selectedContainer(); c != nil {
 		prevID = c.ID
@@ -133,14 +139,16 @@ func (m *Model) handleActionDone(msg containerActionDoneMsg) tea.Cmd {
 func (m *Model) handleLogStreamOpened(msg logStreamOpenedMsg) tea.Cmd {
 	m.cancelStream()
 	m.logLines = nil
+	sc := newLogScanner(msg.reader)
 	m.stream = &logStream{
 		containerID: msg.containerID,
-		scanner:     bufio.NewScanner(msg.reader),
+		scanner:     sc,
 		ctx:         msg.ctx,
 		cancel:      msg.cancel,
 	}
-	m.refreshLogViewportContent()
-	return nextLogLineCmd(m.stream.ctx, msg.containerID, m.stream.scanner)
+	// Clear log viewport content to show "Reading logs…" placeholder.
+	m.logViewport.SetContent("")
+	return nextLogLineCmd(m.stream.ctx, msg.containerID, sc)
 }
 
 func (m *Model) handleLogLine(msg logLineMsg) tea.Cmd {

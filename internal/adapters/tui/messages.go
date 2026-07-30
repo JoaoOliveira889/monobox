@@ -38,6 +38,9 @@ type logStreamDoneMsg struct {
 // spinnerTickMsg drives the loading animation.
 type spinnerTickMsg struct{}
 
+// splashTickMsg drives the splash screen animation.
+type splashTickMsg struct{}
+
 // clearStatusMsg auto-clears the status bar after a delay.
 type clearStatusMsg struct{ id int }
 

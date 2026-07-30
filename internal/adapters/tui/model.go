@@ -19,13 +19,15 @@ var Version = "0.1.0"
 const (
 	minTerminalWidth  = 40
 	minTerminalHeight = 10
-	footerOverhead    = 3 // header + footer + status line
+	// headerHeight = 1 (brand) + 1 (status bar) + 1 (border line)
+	footerOverhead = 4
 
-	logTailLines    = 200
+	logTailLines    = 300
 	refreshInterval = 5 * time.Second
 
 	statusClearDuration = 3 * time.Second
 	spinnerTickInterval = 80 * time.Millisecond
+	splashDuration      = 1500 * time.Millisecond
 
 	defaultRatio   = 0.40
 	minPanelWidth  = 20
@@ -40,7 +42,7 @@ const (
 	LogsPanel
 )
 
-// containerItem is the TUI's view-model for a single container row.
+// containerItem is the TUI view-model for a single container row.
 type containerItem struct {
 	domain.Container
 	loading bool // true while a lifecycle action is in progress
@@ -56,8 +58,8 @@ type logStream struct {
 
 // Model is the root bubbletea model for monobox.
 type Model struct {
-	provider    domain.ContainerProvider
-	engine      string
+	provider domain.ContainerProvider
+	engine   string
 
 	containers  []containerItem
 	cursor      int
@@ -73,6 +75,10 @@ type Model struct {
 	// layout
 	width  int
 	height int
+
+	// splash
+	showSplash  bool
+	splashFrame int
 
 	// status bar
 	statusMsg   string
@@ -96,6 +102,7 @@ func NewModel(provider domain.ContainerProvider, engineName string) Model {
 		listViewport: viewport.New(0, 0),
 		loading:      true,
 		logFollow:    true,
+		showSplash:   true,
 	}
 }
 
@@ -104,6 +111,7 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.loadContainersCmd(),
 		spinnerTickCmd(),
+		splashTickCmd(),
 	)
 }
 
@@ -149,8 +157,8 @@ func (m *Model) cancelStream() {
 
 func (m *Model) appendLogLine(line string) {
 	m.logLines = append(m.logLines, line)
-	if len(m.logLines) > 2000 {
-		m.logLines = m.logLines[len(m.logLines)-2000:]
+	if len(m.logLines) > 5000 {
+		m.logLines = m.logLines[len(m.logLines)-5000:]
 	}
 }
 
@@ -165,6 +173,9 @@ func (m *Model) refreshListViewport() {
 }
 
 func (m *Model) refreshLogViewportContent() {
+	if len(m.logLines) == 0 {
+		return
+	}
 	m.logViewport.SetContent(strings.Join(m.logLines, "\n"))
 	if m.logFollow {
 		m.logViewport.GotoBottom()
@@ -173,23 +184,13 @@ func (m *Model) refreshLogViewportContent() {
 
 var _ tea.Model = &Model{}
 
-// ── Test accessors ────────────────────────────────────────────────────────────
-// These thin exported methods allow black-box testing without exposing internal
-// fields. They are intentionally kept minimal.
+// ── Test accessors ─────────────────────────────────────────────────────────────
 
-// ActivePanel returns the currently active panel (for tests).
 func (m Model) ActivePanel() Panel { return m.activePanel }
+func (m Model) Cursor() int        { return m.cursor }
+func (m Model) LogFollow() bool    { return m.logFollow }
+func (m *Model) SetCursor(i int)   { m.cursor = i }
 
-// Cursor returns the current list cursor position (for tests).
-func (m Model) Cursor() int { return m.cursor }
-
-// LogFollow returns whether log-follow mode is enabled (for tests).
-func (m Model) LogFollow() bool { return m.logFollow }
-
-// SetCursor sets the cursor position (for tests).
-func (m *Model) SetCursor(i int) { m.cursor = i }
-
-// ApplyContainersLoaded directly applies a container list as if received from the engine (for tests).
 func (m *Model) ApplyContainersLoaded(list []domain.Container) {
 	var prevID string
 	if c := m.selectedContainer(); c != nil {

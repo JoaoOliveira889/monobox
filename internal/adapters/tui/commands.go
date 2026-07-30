@@ -48,7 +48,6 @@ func (m Model) containerActionCmd(id, action string) tea.Cmd {
 }
 
 // openLogStreamCmd opens a log stream for a container.
-// Returns logStreamOpenedMsg on success, logStreamDoneMsg on failure.
 func openLogStreamCmd(p domain.ContainerProvider, containerID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -67,8 +66,8 @@ func openLogStreamCmd(p domain.ContainerProvider, containerID string) tea.Cmd {
 	}
 }
 
-// nextLogLineCmd reads one line from scanner and emits it as logLineMsg.
-// On EOF or context cancellation, emits logStreamDoneMsg.
+// nextLogLineCmd reads the next line from the scanner and emits it.
+// Uses a large buffer to handle long log lines (e.g. JSON logs).
 func nextLogLineCmd(ctx context.Context, containerID string, sc *bufio.Scanner) tea.Cmd {
 	return func() tea.Msg {
 		select {
@@ -79,8 +78,19 @@ func nextLogLineCmd(ctx context.Context, containerID string, sc *bufio.Scanner) 
 		if sc.Scan() {
 			return logLineMsg{containerID: containerID, line: sc.Text()}
 		}
+		if err := sc.Err(); err != nil {
+			logging.Error("scanner error", "container", containerID, "err", err)
+		}
 		return logStreamDoneMsg{containerID: containerID}
 	}
+}
+
+// newLogScanner creates a bufio.Scanner with a 1MB token buffer for large log lines.
+func newLogScanner(r io.Reader) *bufio.Scanner {
+	sc := bufio.NewScanner(r)
+	buf := make([]byte, 1024*1024) // 1 MB buffer
+	sc.Buffer(buf, 1024*1024)
+	return sc
 }
 
 // spinnerTickCmd schedules the next spinner frame.
@@ -90,7 +100,14 @@ func spinnerTickCmd() tea.Cmd {
 	})
 }
 
-// tickCmd schedules the next periodic container list refresh.
+// splashTickCmd drives the splash screen animation.
+func splashTickCmd() tea.Cmd {
+	return tea.Tick(90*time.Millisecond, func(time.Time) tea.Msg {
+		return splashTickMsg{}
+	})
+}
+
+// tickCmd schedules periodic container list refresh.
 func tickCmd() tea.Cmd {
 	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg {
 		return tickMsg(t)

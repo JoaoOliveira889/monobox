@@ -14,11 +14,11 @@ import (
 
 // dockerContainer is the JSON shape returned by "docker ps --format json".
 type dockerContainer struct {
-	ID      string `json:"ID"`
-	Names   string `json:"Names"`
-	Image   string `json:"Image"`
-	State   string `json:"State"`
-	Status  string `json:"Status"`
+	ID         string `json:"ID"`
+	Names      string `json:"Names"`
+	Image      string `json:"Image"`
+	State      string `json:"State"`
+	Status     string `json:"Status"`
 	RunningFor string `json:"RunningFor"`
 }
 
@@ -58,14 +58,18 @@ func (d *DockerProvider) Restart(id string) error {
 	return runCmd("docker", "restart", id)
 }
 
-// Logs streams container logs. tail=0 means "all". follow controls -f flag.
+// Logs streams container logs.
+// tail is the number of historic lines (0 = all).
+// follow controls whether the stream stays open for new output.
 func (d *DockerProvider) Logs(ctx context.Context, id string, tail int, follow bool) (io.ReadCloser, error) {
 	return dockerLogs(ctx, "docker", id, tail, follow)
 }
 
-// dockerLogs builds the exec.Cmd for log streaming and returns its stdout pipe.
+// dockerLogs runs "docker logs" and returns a ReadCloser of the combined output.
+// Uses a goroutine to merge stdout+stderr through a single pipe, avoiding
+// concurrent writes from separate goroutines.
 func dockerLogs(ctx context.Context, binary, id string, tail int, follow bool) (io.ReadCloser, error) {
-	args := []string{"logs", "--timestamps"}
+	args := []string{"logs"}
 	if follow {
 		args = append(args, "-f")
 	}
@@ -77,19 +81,26 @@ func dockerLogs(ctx context.Context, binary, id string, tail int, follow bool) (
 	args = append(args, id)
 
 	cmd := exec.CommandContext(ctx, binary, args...)
-	// Docker writes logs to stderr as well; combine both.
+
+	// StdoutPipe gives us a safe single reader. Docker logs writes to stderr
+	// by default for older API versions, but modern docker logs outputs to stdout.
+	// We combine by assigning the same pipe writer to both.
 	pr, pw := io.Pipe()
 	cmd.Stdout = pw
 	cmd.Stderr = pw
+
 	if err := cmd.Start(); err != nil {
-		pr.Close()
-		pw.Close()
-		return nil, fmt.Errorf("%s logs: %w", binary, err)
+		_ = pw.Close()
+		_ = pr.Close()
+		return nil, fmt.Errorf("%s logs %s: %w", binary, id, err)
 	}
+
+	// Close the write end when the command exits so readers see EOF.
 	go func() {
-		cmd.Wait()
-		pw.Close()
+		_ = cmd.Wait()
+		_ = pw.Close()
 	}()
+
 	return pr, nil
 }
 
@@ -104,7 +115,7 @@ func parseDockerJSON(raw []byte, eng domain.Engine) ([]domain.Container, error) 
 		}
 		var dc dockerContainer
 		if err := json.Unmarshal([]byte(line), &dc); err != nil {
-			continue // skip malformed lines
+			continue
 		}
 		containers = append(containers, domain.Container{
 			ID:         dc.ID,
@@ -133,16 +144,20 @@ func parseDockerState(state string) domain.ContainerStatus {
 	}
 }
 
-// parseRunningFor extracts a short human-readable uptime from Docker's Status field
-// e.g. "Up 5 minutes" -> "5 minutes" or "Exited (0) 2 hours ago" -> "2 hours ago".
+// parseRunningFor extracts a short human-readable uptime from Docker's Status field.
+// "Up 5 minutes" → "5 minutes", "Exited (0) 2 hours ago" → "2 hours ago"
 func parseRunningFor(status string) string {
 	status = strings.TrimSpace(status)
-	if strings.HasPrefix(strings.ToLower(status), "up ") {
-		return strings.TrimPrefix(status, "Up ")
+	lower := strings.ToLower(status)
+	if strings.HasPrefix(lower, "up ") {
+		after := strings.TrimPrefix(status, "Up ")
+		if after == "" {
+			after = strings.TrimPrefix(status, "up ")
+		}
+		return after
 	}
-	parts := strings.Split(status, " ")
+	parts := strings.Fields(status)
 	if len(parts) >= 3 {
-		// "Exited (0) 2 hours ago" → last 3 words
 		return strings.Join(parts[len(parts)-3:], " ")
 	}
 	return status
