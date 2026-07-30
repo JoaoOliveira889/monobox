@@ -24,7 +24,7 @@ var (
 	ColorEmerald   lipgloss.Color
 	ColorAmber     lipgloss.Color
 	ColorMono      lipgloss.Color
-	ColorBox       lipgloss.Color // accent color for "Box" brand segment
+	ColorBox       lipgloss.Color
 )
 
 const (
@@ -126,7 +126,7 @@ var Themes = []Theme{
 		Emerald:   "#34d399",
 		Amber:     "#fbbf24",
 		Mono:      "#d7d7d7",
-		Box:       "#7dcfff",
+		Box:       "#b8ff3d",
 	},
 	{
 		Name:      "Dracula",
@@ -147,7 +147,7 @@ var Themes = []Theme{
 		Emerald:   "#50fa7b",
 		Amber:     "#f1fa8c",
 		Mono:      "#f8f8f2",
-		Box:       "#8be9fd",
+		Box:       "#50fa7b",
 	},
 	{
 		Name:      "Nord",
@@ -189,7 +189,7 @@ var Themes = []Theme{
 		Emerald:   "#b8bb26",
 		Amber:     "#fabd2f",
 		Mono:      "#ebdbb2",
-		Box:       "#8ec07c",
+		Box:       "#b8bb26",
 	},
 	{
 		Name:      "Monokai",
@@ -210,7 +210,7 @@ var Themes = []Theme{
 		Emerald:   "#a6e22e",
 		Amber:     "#e6db74",
 		Mono:      "#f8f8f2",
-		Box:       "#66d9ef",
+		Box:       "#a6e22e",
 	},
 	{
 		Name:      "One Dark",
@@ -231,7 +231,7 @@ var Themes = []Theme{
 		Emerald:   "#98c379",
 		Amber:     "#e2c08d",
 		Mono:      "#abb2bf",
-		Box:       "#56b6c2",
+		Box:       "#98c379",
 	},
 }
 

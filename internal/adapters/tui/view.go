@@ -27,10 +27,19 @@ func (m *Model) View() string {
 	}
 
 	header := m.renderHeader()
-	body := m.renderBody()
 	footer := m.renderFooter()
+	body := m.renderBody()
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	view := lipgloss.JoinVertical(lipgloss.Left,
+		header,
+		body,
+		footer,
+	)
+
+	return lipgloss.NewStyle().
+		MaxWidth(m.width).
+		MaxHeight(m.height).
+		Render(view)
 }
 
 // renderSplash renders the startup splash screen (monogit style).
@@ -45,7 +54,7 @@ func (m *Model) renderSplash() string {
 	subtitle := ui.SubtleStyle.Render("Docker & Podman container manager")
 
 	body := lipgloss.JoinVertical(lipgloss.Center,
-		renderBrandWordmark(),
+		renderBrandWordmark(false),
 		"",
 		subtitle,
 		"",
@@ -64,49 +73,60 @@ func splashDots(frame int) string {
 	return frames[frame%len(frames)]
 }
 
-func renderBrandWordmark() string {
+func renderBrandWordmark(compact bool) string {
+	mono := ui.BrandMonoStyle
+	box := ui.BrandBoxStyle
+	subtle := ui.SubtleStyle
+
+	if compact {
+		return lipgloss.JoinHorizontal(lipgloss.Bottom,
+			mono.Render("Mono"),
+			box.Render("Box"),
+		)
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Center,
-		lipgloss.JoinHorizontal(lipgloss.Bottom,
-			ui.BrandMonoStyle.Render("mono"),
-			ui.BrandBoxStyle.Render("box"),
+		lipgloss.JoinHorizontal(lipgloss.Top,
+			mono.Render("Mono"),
+			box.Render("Box"),
 		),
-		ui.SubtleStyle.Render("container manager"),
+		subtle.Render("container dashboard"),
 	)
 }
 
-func renderBrandCompact() string {
-	return lipgloss.JoinHorizontal(lipgloss.Bottom,
-		ui.BrandMonoStyle.Render("mono"),
-		ui.BrandBoxStyle.Render("box"),
-	)
-}
-
-// renderHeader — matches monogit's header style:
-// brand  •  spinner/status  •  container count
+// renderHeader matches monogit's header style:
+// brand wordmark (MonoBox 2-color) • spinner/loading • stats
 func (m *Model) renderHeader() string {
-	brand := renderBrandCompact()
-
-	// Status / spinner line
-	var middle string
-	if m.loading {
-		middle = ui.SpinnerStyle.Render(m.spinnerView() + " loading containers…")
-	} else if m.stream != nil {
-		middle = ui.SpinnerStyle.Render(m.spinnerView() + " streaming logs…")
+	var brand string
+	switch {
+	case m.width < 30:
+		brand = ui.BrandMonoStyle.Render("MB")
+	default:
+		brand = renderBrandWordmark(true)
 	}
 
-	// Right: container count + engine
-	stats := ""
+	var stats string
 	if m.width >= 50 {
-		running := 0
-		for _, c := range m.containers {
-			if c.IsRunning() {
-				running++
-			}
-		}
-		stats = fmt.Sprintf("%d containers  %d running  [%s] ", len(m.containers), running, m.engine)
+		stats = fmt.Sprintf("%d containers ", len(m.containers))
 	}
 
-	spacerLen := m.width - lipgloss.Width(brand) - lipgloss.Width(middle) - lipgloss.Width(stats)
+	loading := ""
+	if m.loading {
+		if m.width >= 40 {
+			loading = ui.SpinnerStyle.Render(m.spinnerView() + " Loading...")
+		} else {
+			loading = ui.SpinnerStyle.Render(m.spinnerView())
+		}
+	} else if m.stream != nil {
+		loading = ui.SpinnerStyle.Render(m.spinnerView() + " Streaming...")
+	}
+
+	brandW := lipgloss.Width(brand)
+	statsW := lipgloss.Width(stats)
+	loadingW := lipgloss.Width(loading)
+
+	// Spacer len minus 2 for leading & trailing space paddings
+	spacerLen := m.width - brandW - statsW - loadingW - 2
 	if spacerLen < 0 {
 		spacerLen = 0
 	}
@@ -115,55 +135,67 @@ func (m *Model) renderHeader() string {
 	headerLine := " " + lipgloss.JoinHorizontal(lipgloss.Bottom,
 		brand,
 		spacer,
-		middle,
+		loading,
 		ui.SubtleStyle.Render(stats),
-	)
+	) + " "
+
+	if lipgloss.Width(headerLine) > m.width {
+		headerLine = truncateRunes(headerLine, m.width)
+	}
 
 	border := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ui.ColorBorder)).
 		Render(strings.Repeat("─", m.width))
 
-	// Status bar line (success/error/info messages)
-	statusLine := m.renderStatusBar()
+	styledStatus := m.renderHeaderStatusBar()
 
-	return headerLine + "\n" + statusLine + "\n" + border
+	return headerLine + "\n" + styledStatus + "\n" + border
 }
 
-func (m *Model) renderStatusBar() string {
-	if m.statusMsg == "" {
-		// Show summary: running / stopped counts
-		var parts []string
-		running, stopped := 0, 0
-		for _, c := range m.containers {
-			if c.IsRunning() {
-				running++
-			} else {
-				stopped++
-			}
+func (m *Model) renderHeaderStatusBar() string {
+	if m.statusMsg != "" {
+		msg := " " + m.statusMsg
+		switch {
+		case strings.HasPrefix(m.statusMsg, "✓"):
+			return ui.StatusSuccessStyle.MaxWidth(m.width).Render(msg)
+		case strings.HasPrefix(m.statusMsg, "✗"):
+			return ui.StatusErrorStyle.MaxWidth(m.width).Render(msg)
+		default:
+			return ui.StatusInfoStyle.MaxWidth(m.width).Render(msg)
 		}
-		dot := lipgloss.NewStyle().Foreground(ui.ColorSuccess).Render("●")
-		if len(m.containers) > 0 {
-			parts = append(parts, fmt.Sprintf("%d running", running))
-			if stopped > 0 {
-				parts = append(parts, ui.SubtleStyle.Render(fmt.Sprintf("%d stopped", stopped)))
-			}
-		} else if !m.loading {
-			parts = append(parts, "No containers found")
-		}
-
-		sep := ui.SubtleStyle.Render("  •  ")
-		barText := " " + dot + " " + strings.Join(parts, sep)
-		return ui.SubtleStyle.Width(m.width).Render(barText)
 	}
 
-	switch {
-	case strings.HasPrefix(m.statusMsg, "✓"):
-		return ui.StatusSuccessStyle.Width(m.width).Render(" " + m.statusMsg)
-	case strings.HasPrefix(m.statusMsg, "✗"):
-		return ui.StatusErrorStyle.Width(m.width).Render(" " + m.statusMsg)
-	default:
-		return ui.StatusInfoStyle.Width(m.width).Render(" " + m.statusMsg)
+	var parts []string
+	total := len(m.containers)
+	running, stopped := 0, 0
+	for _, c := range m.containers {
+		if c.IsRunning() {
+			running++
+		} else {
+			stopped++
+		}
 	}
+
+	dot := lipgloss.NewStyle().Foreground(ui.ColorSuccess).Render("●")
+
+	if total > 0 {
+		parts = append(parts, fmt.Sprintf("%d containers", total))
+		parts = append(parts, ui.RunningStyle.Render(fmt.Sprintf("%d running", running)))
+		if stopped > 0 {
+			parts = append(parts, ui.StoppedStyle.Render(fmt.Sprintf("%d stopped", stopped)))
+		}
+		parts = append(parts, ui.SubtleStyle.Render("["+m.engine+"]"))
+	} else if !m.loading {
+		parts = append(parts, "No containers found")
+	}
+
+	helpHint := ui.LabelStyle.Render("Press q to quit")
+	parts = append(parts, helpHint)
+
+	sep := ui.SubtleStyle.Render("  •  ")
+	barText := " " + dot + " " + strings.Join(parts, sep)
+
+	return ui.SubtleStyle.MaxWidth(m.width).Render(barText)
 }
 
 // renderFooter — matches monogit's footer: key hints left, version right.
@@ -180,7 +212,7 @@ func (m *Model) renderFooter() string {
 		}
 	} else {
 		parts = []string{
-			m.fmtKey("↑↓/jk", "navigate"),
+			m.fmtKey("↑↓/jk", "nav"),
 			m.fmtKey("enter", "logs"),
 			m.fmtKey("s", "start/stop"),
 			m.fmtKey("r", "restart"),
@@ -188,6 +220,10 @@ func (m *Model) renderFooter() string {
 		}
 	}
 
+	return m.renderResponsiveFooter(parts, sep)
+}
+
+func (m *Model) renderResponsiveFooter(parts []string, sep string) string {
 	version := ui.SubtleStyle.Render(fmt.Sprintf("monobox %s", Version))
 
 	contentWidth := m.width - 2
@@ -203,15 +239,16 @@ func (m *Model) renderFooter() string {
 		rendered = strings.Join(parts, sep)
 	}
 
-	spacerLen := contentWidth - lipgloss.Width(rendered) - lipgloss.Width(version)
+	left := rendered
+	spacerLen := contentWidth - lipgloss.Width(left) - lipgloss.Width(version)
 	if spacerLen < 0 {
 		spacerLen = 0
 	}
 	spacer := strings.Repeat(" ", spacerLen)
 
-	footerText := " " + rendered + spacer + version
-	if w := lipgloss.Width(footerText); w < contentWidth+1 {
-		footerText += strings.Repeat(" ", contentWidth+1-w)
+	footerText := " " + left + spacer + version
+	if footerWidth := lipgloss.Width(footerText); footerWidth < contentWidth+1 {
+		footerText += strings.Repeat(" ", contentWidth+1-footerWidth)
 	}
 
 	return ui.FooterStyle.Padding(0, 0).Render(footerText)
@@ -223,43 +260,18 @@ func (m *Model) fmtKey(k, action string) string {
 
 // renderBody renders the two-panel layout.
 func (m *Model) renderBody() string {
-	ph := m.panelHeight()
-
-	// Container list panel — "Containers" title, mono accent when active
-	listAccent := lipgloss.Color(ui.ColorMono)
-	left := m.renderTitledPanel(
-		m.leftPanelWidth(), ph,
-		"Containers",
-		renderViewportWithScrollbar(m.listViewport, m.activePanel == ListPanel),
-		m.activePanel == ListPanel,
-		listAccent,
-	)
-
-	// Logs panel — show container name in title, box accent when active
-	logsTitle := "Logs"
-	if c := m.selectedContainer(); c != nil {
-		logsTitle = "Logs — " + c.Name
-		if m.logFollow {
-			logsTitle += " [follow]"
-		}
+	headerHeight := 3
+	footerHeight := 1
+	bodyHeight := m.height - headerHeight - footerHeight
+	if bodyHeight < 5 {
+		bodyHeight = 5
 	}
 
-	logsContent := m.logViewport.View()
-	if len(m.logLines) == 0 && m.activePanel == LogsPanel {
-		if m.stream != nil {
-			logsContent = ui.SpinnerStyle.Render(m.spinnerView() + " Reading logs…")
-		}
-	} else if len(m.logLines) == 0 {
-		logsContent = ui.SubtleStyle.Render("Select a container and press Enter to view logs.")
-	}
+	leftWidth := m.leftPanelWidth()
+	rightWidth := m.rightPanelWidth()
 
-	right := m.renderTitledPanel(
-		m.rightPanelWidth(), ph,
-		logsTitle,
-		logsContent,
-		m.activePanel == LogsPanel,
-		lipgloss.Color(ui.ColorBox),
-	)
+	left := m.renderRepoList(leftWidth, bodyHeight)
+	right := m.renderDetailPanel(rightWidth, bodyHeight)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
@@ -270,20 +282,11 @@ func (m *Model) refreshViewports() {
 	m.refreshLogViewportContent()
 }
 
-// renderCenteredModal centers content on screen (for future modals).
+// renderCenteredModal centers content on screen.
 func (m *Model) renderCenteredModal(content string) string {
 	return lipgloss.Place(
 		m.width, m.height,
 		lipgloss.Center, lipgloss.Center,
 		ui.ActivePanelStyle.Padding(1, 2).Render(content),
 	)
-}
-
-// renderViewportWithScrollbar renders viewport content with a scrollbar indicator
-// when content overflows — matches monogit's pattern.
-func renderViewportWithScrollbar(vp interface {
-	View() string
-	ScrollPercent() float64
-}, active bool) string {
-	return vp.View()
 }

@@ -13,7 +13,7 @@ import (
 // renderTitledPanel renders a bordered panel with a decorative title in the
 // top border — identical pattern to monogit.
 func (m *Model) renderTitledPanel(width, height int, title, content string, active bool, accent lipgloss.Color) string {
-	borderColor := ui.ColorBorder
+	borderColor := lipgloss.Color(ui.ColorBorder)
 	if active {
 		borderColor = accent
 	}
@@ -24,7 +24,6 @@ func (m *Model) renderTitledPanel(width, height int, title, content string, acti
 		borderStyle = borderStyle.Bold(true)
 	}
 
-	// Truncate title if needed.
 	maxTitleWidth := width - 6
 	if maxTitleWidth < 3 {
 		maxTitleWidth = 3
@@ -41,8 +40,10 @@ func (m *Model) renderTitledPanel(width, height int, title, content string, acti
 		titleStyled = ui.SubtleStyle.Render(title)
 	}
 
-	// Build top border with embedded title: ╭─[Title]──────╮
-	repeatCount := width - lipgloss.Width("─["+title+"]─") - 2
+	titleText := "─[" + titleStyled + "]─"
+	titleWidth := lipgloss.Width(titleText)
+
+	repeatCount := width - titleWidth - 2
 	if repeatCount < 0 {
 		repeatCount = 0
 	}
@@ -70,14 +71,26 @@ func (m *Model) renderTitledPanel(width, height int, title, content string, acti
 	return lipgloss.JoinVertical(lipgloss.Left, topLine, panel)
 }
 
-// renderContainerListContent renders the rows inside the container list viewport.
-// Layout: ▌ prefix | status icon | name (branch-style) | image | uptime/status right-aligned
+// renderRepoList renders the container list panel (left side).
+func (m *Model) renderRepoList(width, height int) string {
+	content := m.listViewport.View()
+	if m.loading {
+		content = ui.SpinnerStyle.Render(m.spinnerView() + " Loading containers…")
+	} else if len(m.containers) == 0 {
+		content = ui.SubtleStyle.Render(" No containers found.\n Make sure Docker or Podman is running.")
+	}
+
+	accent := lipgloss.Color(ui.ColorMono)
+	return m.renderTitledPanel(width, height, "Containers", content, m.activePanel == ListPanel, accent)
+}
+
+// renderContainerListContent renders all container rows inside listViewport.
 func (m *Model) renderContainerListContent() string {
 	if m.loading {
 		return ui.SpinnerStyle.Render(m.spinnerView() + " Loading containers…")
 	}
 	if len(m.containers) == 0 {
-		return ui.SubtleStyle.Render("  No containers found.\n  Make sure Docker or Podman is running.")
+		return ui.SubtleStyle.Render(" No containers found.\n Make sure Docker or Podman is running.")
 	}
 
 	vpWidth := m.listViewport.Width
@@ -92,17 +105,14 @@ func (m *Model) renderContainerListContent() string {
 	return strings.Join(rows, "\n")
 }
 
-// renderContainerRow renders a single container row — monogit's renderRepoLine style.
+// renderContainerRow renders a single container row in monogit repoLine style.
 func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) string {
 	selected := index == m.cursor
-
-	// Background style for selected rows.
 	var bgStyle lipgloss.Style
 	if selected {
 		bgStyle = lipgloss.NewStyle().Background(ui.ColorHighlight)
 	}
 
-	// Left prefix: ▌ (cursor) or two spaces.
 	var prefix string
 	if selected {
 		prefix = bgStyle.Foreground(ui.ColorBg).Render("▌ ")
@@ -110,40 +120,22 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 		prefix = "  "
 	}
 
-	// Status icon + indicator string (right-aligned cluster).
-	statusIcon, statusStyle := containerStatusDisplay(c.Container)
-	if c.loading {
-		statusIcon = m.spinnerView()
-		statusStyle = ui.SpinnerStyle
-	}
-
-	// Build indicator cluster (right side).
-	var indicators []string
+	// Right-aligned status badge
+	var statusBadge string
 	if selected {
-		indicators = append(indicators, bgStyle.Foreground(ui.ColorBg).Bold(true).Render(statusIcon))
+		statusBadge = bgStyle.Foreground(ui.ColorBg).Bold(true).Render(statusBadgeText(c.Container))
 	} else {
-		indicators = append(indicators, statusStyle.Render(statusIcon))
+		statusBadge = statusBadgeStyled(c.Container)
 	}
 
-	// Engine tag (subtle, right cluster).
-	engineTag := string(c.Engine)
-	if selected {
-		indicators = append(indicators, bgStyle.Foreground(ui.ColorBg).Render(engineTag))
-	} else {
-		indicators = append(indicators, ui.SubtleStyle.Render(engineTag))
-	}
-
-	indicatorStr := strings.Join(indicators, " ")
-
-	// Available width for name + image.
 	prefixWidth := lipgloss.Width(prefix)
-	indicatorWidth := lipgloss.Width(indicatorStr)
-	availForText := maxWidth - prefixWidth - indicatorWidth - 1
+	statusWidth := lipgloss.Width(statusBadge)
+
+	availForText := maxWidth - prefixWidth - statusWidth - 1
 	if availForText < 5 {
 		availForText = 5
 	}
 
-	// Container name (primary, left).
 	name := c.Name
 	nameWidth := lipgloss.Width(name)
 
@@ -162,13 +154,12 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 			nameStr = lipgloss.NewStyle().Foreground(ui.ColorFg).Render(name)
 		}
 
-		// Image name (secondary, branch-style).
 		availForImage := availForText - nameWidth - 1
 		if availForImage >= 4 {
-			maxImageLen := availForImage - 3
+			maxImgLen := availForImage - 3
 			img := c.Image
-			if lipgloss.Width(img) > maxImageLen {
-				img = truncateRunes(img, maxImageLen)
+			if lipgloss.Width(img) > maxImgLen {
+				img = truncateRunes(img, maxImgLen)
 			}
 			if img != "" {
 				if selected {
@@ -193,9 +184,8 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 		leftContent += midSp + imageStr
 	}
 
-	// Gap between name and indicators.
 	leftWidth := lipgloss.Width(leftContent)
-	gapLen := maxWidth - leftWidth - indicatorWidth
+	gapLen := maxWidth - leftWidth - statusWidth
 	if gapLen < 1 {
 		gapLen = 1
 	}
@@ -204,9 +194,7 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 		gap = bgStyle.Render(gap)
 	}
 
-	row := leftContent + gap + indicatorStr
-
-	// Pad to full width for uniform selected background.
+	row := leftContent + gap + statusBadge
 	rowWidth := lipgloss.Width(row)
 	if rowWidth < maxWidth {
 		padding := strings.Repeat(" ", maxWidth-rowWidth)
@@ -220,23 +208,114 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 	return row
 }
 
-// containerStatusDisplay returns icon + style for a container's status.
-func containerStatusDisplay(c domain.Container) (icon string, style lipgloss.Style) {
+// statusBadgeText produces unstyled text for selected row background.
+func statusBadgeText(c domain.Container) string {
 	switch c.Status {
 	case domain.StatusRunning:
-		return "▶", ui.RunningStyle
+		return "● RUNNING"
 	case domain.StatusExited:
-		return "■", ui.StoppedStyle
+		return "○ EXITED"
 	case domain.StatusPaused:
-		return "⏸", ui.WarningStyle
+		return "⏸ PAUSED"
 	case domain.StatusCreated:
-		return "○", ui.SubtleStyle
+		return "○ CREATED"
 	default:
-		return "?", ui.SubtleStyle
+		return "? UNKNOWN"
 	}
 }
 
-// truncateRunes truncates s to maxLen runes, adding "…" if needed.
+// statusBadgeStyled produces colored badge text for non-selected rows.
+func statusBadgeStyled(c domain.Container) string {
+	switch c.Status {
+	case domain.StatusRunning:
+		return lipgloss.NewStyle().Foreground(ui.ColorSuccess).Bold(true).Render("● RUNNING")
+	case domain.StatusExited:
+		return ui.SubtleStyle.Render("○ EXITED")
+	case domain.StatusPaused:
+		return lipgloss.NewStyle().Foreground(ui.ColorWarning).Bold(true).Render("⏸ PAUSED")
+	case domain.StatusCreated:
+		return ui.SubtleStyle.Render("○ CREATED")
+	default:
+		return ui.SubtleStyle.Render("? UNKNOWN")
+	}
+}
+
+// renderDetailPanel renders the detail/log panel (right side).
+func (m *Model) renderDetailPanel(width, height int) string {
+	c := m.selectedContainer()
+	if c == nil {
+		content := ui.SubtleStyle.Render(" No container selected")
+		return m.renderTitledPanel(width, height, "Logs", content, false, lipgloss.Color(ui.ColorBorder))
+	}
+
+	var title string
+	var content string
+
+	if m.activePanel == LogsPanel {
+		title = "Logs — " + c.Name
+		if m.logFollow {
+			title += " [follow]"
+		}
+		content = m.logViewport.View()
+		if len(m.logLines) == 0 {
+			if m.stream != nil {
+				content = ui.SpinnerStyle.Render(m.spinnerView() + " Reading logs…")
+			} else {
+				content = ui.SubtleStyle.Render(" No log output received yet.")
+			}
+		}
+	} else {
+		// ListPanel is active: show container detail card + recent logs preview
+		title = "Container — " + c.Name
+
+		var cardLines []string
+		cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "NAME:", ui.ValueStyle.Render(c.Name)))
+		cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "IMAGE:", ui.ValueStyle.Render(c.Image)))
+
+		statusStr := statusBadgeStyled(c.Container)
+		if c.RunningFor != "" {
+			statusStr += ui.SubtleStyle.Render(" (" + c.RunningFor + ")")
+		}
+		cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "STATUS:", statusStr))
+		cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "ENGINE:", ui.SubtleStyle.Render(string(c.Engine))))
+		if c.ID != "" {
+			shortID := c.ID
+			if len(shortID) > 12 {
+				shortID = shortID[:12]
+			}
+			cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "ID:", ui.SubtleStyle.Render(shortID)))
+		}
+
+		cardLines = append(cardLines, "")
+		cardLines = append(cardLines, ui.SubtleStyle.Render("  " + strings.Repeat("─", width-6)))
+		cardLines = append(cardLines, ui.LabelStyle.Render("  ACTIONS & LOGS:"))
+		cardLines = append(cardLines, ui.SubtleStyle.Render("   • Press Enter to open live log stream"))
+		if c.IsRunning() {
+			cardLines = append(cardLines, ui.SubtleStyle.Render("   • Press s to stop container"))
+		} else {
+			cardLines = append(cardLines, ui.SubtleStyle.Render("   • Press s to start container"))
+		}
+		cardLines = append(cardLines, ui.SubtleStyle.Render("   • Press r to restart container"))
+
+		if len(m.logLines) > 0 {
+			cardLines = append(cardLines, "")
+			cardLines = append(cardLines, ui.SubtleStyle.Render("  RECENT LOGS:"))
+			start := len(m.logLines) - 5
+			if start < 0 {
+				start = 0
+			}
+			for _, line := range m.logLines[start:] {
+				cardLines = append(cardLines, ui.SubtleStyle.Render("   "+line))
+			}
+		}
+
+		content = strings.Join(cardLines, "\n")
+	}
+
+	accent := lipgloss.Color(ui.ColorBox)
+	return m.renderTitledPanel(width, height, title, content, m.activePanel == LogsPanel, accent)
+}
+
 func truncateRunes(s string, maxLen int) string {
 	r := []rune(s)
 	if len(r) <= maxLen {
@@ -246,47 +325,4 @@ func truncateRunes(s string, maxLen int) string {
 		return "…"
 	}
 	return string(r[:maxLen-1]) + "…"
-}
-
-// renderLogContent renders the log panel content with ANSI stripping.
-func renderLogContent(lines []string) string {
-	if len(lines) == 0 {
-		return ""
-	}
-	return strings.Join(lines, "\n")
-}
-
-// getPanelTitle returns a panel title with optional number prefix — unused for now
-// but kept for future panel-number feature.
-func getPanelTitle(title string) string {
-	return title
-}
-
-// statusBadge renders a colored status badge for a container.
-func statusBadge(c domain.Container, selected bool) string {
-	var bg lipgloss.Style
-	if selected {
-		bg = lipgloss.NewStyle().Background(ui.ColorHighlight)
-	}
-
-	switch c.Status {
-	case domain.StatusRunning:
-		s := lipgloss.NewStyle().Foreground(ui.ColorSuccess).Bold(true)
-		if selected {
-			s = bg.Foreground(ui.ColorBg).Bold(true)
-		}
-		return s.Render("RUN")
-	case domain.StatusExited:
-		s := lipgloss.NewStyle().Foreground(ui.ColorSubtle)
-		if selected {
-			s = bg.Foreground(ui.ColorBg)
-		}
-		return s.Render("EXT")
-	default:
-		s := ui.SubtleStyle
-		if selected {
-			s = bg.Foreground(ui.ColorBg)
-		}
-		return s.Render(fmt.Sprintf("%-3s", strings.ToUpper(string(c.Status))[:3]))
-	}
 }
