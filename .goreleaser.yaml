@@ -1,0 +1,69 @@
+version: 2
+
+project_name: monobox
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: monobox
+    main: ./cmd/monobox
+    binary: monobox
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: monobox
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  github:
+    owner: JoaoOliveira889
+    name: monobox
+
+brews:
+  - name: monobox
+    homepage: https://github.com/JoaoOliveira889/monobox
+    description: "Terminal UI for Docker and Podman containers"
+    license: MIT
+    repository:
+      owner: JoaoOliveira889
+      name: homebrew-tap
+    directory: Formula
+    install: |
+      bin.install "monobox"
+    test: |
+      system "#{bin}/monobox", "--version"
