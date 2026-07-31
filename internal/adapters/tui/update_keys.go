@@ -13,40 +13,46 @@ func (m *Model) handleKeys(msg tea.KeyMsg) tea.Cmd {
 		return tea.Quit
 	}
 
-	// Global panel navigation: 1 (Containers), 2 (Logs), Tab (toggle)
+	// Panel 1 focus: 1, h, left
 	if matchesKey(msg, keys.Panel1...) {
 		m.activePanel = ListPanel
 		m.refreshListViewport()
 		return nil
 	}
+
+	// Panel 2 focus: 2, l, right
 	if matchesKey(msg, keys.Panel2...) {
+		m.activePanel = LogsPanel
+		m.logFollow = true
+		m.logViewport.GotoBottom()
 		c := m.selectedContainer()
 		if c != nil && m.stream == nil {
-			m.activePanel = LogsPanel
 			m.logLines = nil
 			m.refreshLogViewportContent()
 			return openLogStreamCmd(m.provider, c.ID)
 		}
-		m.activePanel = LogsPanel
 		return nil
 	}
+
+	// Tab: toggle panel focus
 	if matchesKey(msg, keys.Tab...) {
 		if m.activePanel == ListPanel {
+			m.activePanel = LogsPanel
+			m.logFollow = true
+			m.logViewport.GotoBottom()
 			c := m.selectedContainer()
 			if c != nil && m.stream == nil {
-				m.activePanel = LogsPanel
 				m.logLines = nil
 				m.refreshLogViewportContent()
 				return openLogStreamCmd(m.provider, c.ID)
 			}
-			m.activePanel = LogsPanel
 		} else {
 			m.activePanel = ListPanel
 		}
 		return nil
 	}
 
-	// Panel resize: < (or ,) moves divider left, > (or .) moves divider right
+	// Panel ratio resize: < (or ,) moves divider left, > (or .) moves divider right
 	if matchesKey(msg, keys.ResizeLeft...) {
 		m.leftPanelRatio -= resizeStep
 		if m.leftPanelRatio < minLeftPanelRatio {
@@ -90,6 +96,7 @@ func (m *Model) handleListKeys(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		m.activePanel = LogsPanel
+		m.logFollow = true
 		m.logLines = nil
 		m.refreshLogViewportContent()
 		return openLogStreamCmd(m.provider, c.ID)
@@ -143,6 +150,12 @@ func (m *Model) handleLogsKeys(msg tea.KeyMsg) tea.Cmd {
 		} else {
 			m.setStatus("Follow: OFF")
 		}
+
+	case matchesKey(msg, keys.ClearLogs...):
+		// c / ctrl+l: clear log buffer.
+		m.logLines = nil
+		m.logViewport.SetContent("")
+		m.setStatus("✓ Logs cleared")
 
 	case matchesKey(msg, keys.Up...):
 		m.logViewport.LineUp(1)

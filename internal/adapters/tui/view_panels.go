@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/JoaoOliveira889/monobox/internal/domain"
@@ -40,10 +41,11 @@ func (m *Model) renderTitledPanel(width, height int, title, content string, acti
 		titleStyled = ui.SubtleStyle.Render(title)
 	}
 
-	titleText := "─[" + titleStyled + "]─"
-	titleWidth := lipgloss.Width(titleText)
-
-	repeatCount := width - titleWidth - 2
+	// Exact top line width calculation:
+	// TopLeft (1) + "─[" (2) + title (len) + "]" (1) + Top (repeatCount) + TopRight (1) = width
+	// => repeatCount = width - len(title) - 5
+	titleLen := lipgloss.Width(title)
+	repeatCount := width - titleLen - 5
 	if repeatCount < 0 {
 		repeatCount = 0
 	}
@@ -106,8 +108,8 @@ func (m *Model) renderContainerListContent() string {
 	return strings.Join(rows, "\n")
 }
 
-// renderContainerRow renders a single container row in monogit repoLine style.
-// Shows container name on the left and status badge on the right (no parenthesized image).
+// renderContainerRow renders a single container row with tech icon + container name on left
+// and status badge on right (no parenthesized image name).
 func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) string {
 	selected := index == m.cursor
 	var bgStyle lipgloss.Style
@@ -122,6 +124,10 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 		prefix = "  "
 	}
 
+	// Tech / engine icon (e.g. 🐘 postgres, ⚡ redis, 🔒 fga, ⚙ grpc/api, 🐳 docker)
+	icon := containerIcon(c.Container)
+	iconStr := icon + " "
+
 	// Right-aligned status badge
 	var statusBadge string
 	if selected {
@@ -131,9 +137,10 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 	}
 
 	prefixWidth := lipgloss.Width(prefix)
+	iconWidth := lipgloss.Width(iconStr)
 	statusWidth := lipgloss.Width(statusBadge)
 
-	availForName := maxWidth - prefixWidth - statusWidth - 1
+	availForName := maxWidth - prefixWidth - iconWidth - statusWidth - 1
 	if availForName < 3 {
 		availForName = 3
 	}
@@ -150,7 +157,14 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 		nameStr = lipgloss.NewStyle().Foreground(ui.ColorFg).Render(name)
 	}
 
-	leftContent := prefix + nameStr
+	var iconStyled string
+	if selected {
+		iconStyled = bgStyle.Foreground(ui.ColorBg).Render(iconStr)
+	} else {
+		iconStyled = iconStr
+	}
+
+	leftContent := prefix + iconStyled + nameStr
 	leftWidth := lipgloss.Width(leftContent)
 	gapLen := maxWidth - leftWidth - statusWidth
 	if gapLen < 1 {
@@ -177,13 +191,68 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 	return row
 }
 
+// containerIcon determines a smart icon for the container based on its name/image/engine.
+func containerIcon(c domain.Container) string {
+	lower := strings.ToLower(c.Name + " " + c.Image)
+	switch {
+	case strings.Contains(lower, "postgres") || strings.Contains(lower, "pg"):
+		return "🐘"
+	case strings.Contains(lower, "redis"):
+		return "⚡"
+	case strings.Contains(lower, "mongo"):
+		return "🍃"
+	case strings.Contains(lower, "mysql") || strings.Contains(lower, "mariadb"):
+		return "🐬"
+	case strings.Contains(lower, "nginx") || strings.Contains(lower, "caddy") || strings.Contains(lower, "httpd") || strings.Contains(lower, "web"):
+		return "🌐"
+	case strings.Contains(lower, "grpc") || strings.Contains(lower, "api") || strings.Contains(lower, "service") || strings.Contains(lower, "node"):
+		return "⚙"
+	case strings.Contains(lower, "openfga") || strings.Contains(lower, "auth") || strings.Contains(lower, "keycloak"):
+		return "🔒"
+	case strings.Contains(lower, "queue") || strings.Contains(lower, "rabbitmq") || strings.Contains(lower, "kafka"):
+		return "📬"
+	default:
+		if c.Engine == domain.EnginePodman {
+			return "🦭"
+		}
+		return "🐳"
+	}
+}
+
+// containerIconLabel returns an icon + text label for the detail card.
+func containerIconLabel(c domain.Container) string {
+	icon := containerIcon(c)
+	lower := strings.ToLower(c.Name + " " + c.Image)
+	switch {
+	case strings.Contains(lower, "postgres") || strings.Contains(lower, "pg"):
+		return icon + " Postgres"
+	case strings.Contains(lower, "redis"):
+		return icon + " Redis"
+	case strings.Contains(lower, "mongo"):
+		return icon + " MongoDB"
+	case strings.Contains(lower, "mysql") || strings.Contains(lower, "mariadb"):
+		return icon + " MySQL"
+	case strings.Contains(lower, "nginx") || strings.Contains(lower, "caddy"):
+		return icon + " Web Server"
+	case strings.Contains(lower, "grpc") || strings.Contains(lower, "api") || strings.Contains(lower, "service"):
+		return icon + " gRPC / API Service"
+	case strings.Contains(lower, "openfga") || strings.Contains(lower, "auth"):
+		return icon + " OpenFGA Auth"
+	default:
+		if c.Engine == domain.EnginePodman {
+			return icon + " Podman Container"
+		}
+		return icon + " Docker Container"
+	}
+}
+
 func statusBadgeText(c domain.Container, maxWidth int) string {
 	if maxWidth < 25 {
 		switch c.Status {
 		case domain.StatusRunning:
 			return "● RUN"
 		case domain.StatusExited:
-			return "○ OFF"
+			return "○ STOPPED"
 		case domain.StatusPaused:
 			return "⏸ PAUS"
 		default:
@@ -194,7 +263,7 @@ func statusBadgeText(c domain.Container, maxWidth int) string {
 	case domain.StatusRunning:
 		return "● RUNNING"
 	case domain.StatusExited:
-		return "○ EXITED"
+		return "○ STOPPED"
 	case domain.StatusPaused:
 		return "⏸ PAUSED"
 	case domain.StatusCreated:
@@ -236,7 +305,7 @@ func (m *Model) renderDetailPanel(width, height int) string {
 		if m.logFollow {
 			title += " [follow]"
 		}
-		content = m.logViewport.View()
+		content = renderViewportWithScrollbar(m.logViewport, true)
 		if len(m.logLines) == 0 {
 			if m.stream != nil {
 				content = ui.SpinnerStyle.Render(m.spinnerView() + " Reading logs…")
@@ -250,6 +319,7 @@ func (m *Model) renderDetailPanel(width, height int) string {
 
 		var cardLines []string
 		cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "NAME:", ui.ValueStyle.Render(c.Name)))
+		cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "TYPE:", ui.ValueStyle.Render(containerIconLabel(c.Container))))
 		cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "IMAGE:", ui.ValueStyle.Render(c.Image)))
 
 		statusStr := statusBadgeStyled(c.Container, width)
@@ -273,7 +343,7 @@ func (m *Model) renderDetailPanel(width, height int) string {
 		cardLines = append(cardLines, "")
 		cardLines = append(cardLines, ui.SubtleStyle.Render("  "+strings.Repeat("─", divWidth)))
 		cardLines = append(cardLines, ui.LabelStyle.Render("  ACTIONS & LOGS:"))
-		cardLines = append(cardLines, ui.SubtleStyle.Render("   • Press Enter to open live log stream"))
+		cardLines = append(cardLines, ui.SubtleStyle.Render("   • Press Enter / l / 2 to open live log stream"))
 		if c.IsRunning() {
 			cardLines = append(cardLines, ui.SubtleStyle.Render("   • Press s to stop container"))
 		} else {
@@ -301,6 +371,48 @@ func (m *Model) renderDetailPanel(width, height int) string {
 
 	accent := lipgloss.Color(ui.ColorBox)
 	return m.renderTitledPanel(width, height, title, content, m.activePanel == LogsPanel, accent)
+}
+
+// renderViewportWithScrollbar renders viewport content with a vertical scrollbar
+// indicator on the right edge when content overflows.
+func renderViewportWithScrollbar(vp viewport.Model, active bool) string {
+	content := vp.View()
+	lines := strings.Split(content, "\n")
+	height := len(lines)
+	if height == 0 {
+		return content
+	}
+
+	percent := vp.ScrollPercent()
+	if percent < 0 {
+		percent = 0
+	} else if percent > 1.0 {
+		percent = 1.0
+	}
+
+	thumbPos := int(percent * float64(height-1))
+	if thumbPos >= height {
+		thumbPos = height - 1
+	}
+
+	trackColor := ui.ColorBorder
+	thumbColor := ui.ColorSubtle
+	if active {
+		thumbColor = ui.ColorHighlight
+	}
+
+	thumbStyle := lipgloss.NewStyle().Foreground(thumbColor).Bold(true)
+	trackStyle := lipgloss.NewStyle().Foreground(trackColor)
+
+	for i := 0; i < height; i++ {
+		if i == thumbPos {
+			lines[i] += " " + thumbStyle.Render("█")
+		} else {
+			lines[i] += " " + trackStyle.Render("│")
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func truncateRunes(s string, maxLen int) string {

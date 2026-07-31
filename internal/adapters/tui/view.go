@@ -216,16 +216,17 @@ func (m *Model) renderFooter() string {
 
 	if m.activePanel == LogsPanel {
 		parts = []string{
-			m.fmtKey("1/2/tab", "focus"),
+			m.fmtKey("1/2/h/l/tab", "focus"),
 			m.fmtKey("<>", "resize"),
 			m.fmtKey("↑↓/jk", "scroll"),
 			m.fmtKey("f", "follow"),
+			m.fmtKey("c", "clear"),
 			m.fmtKey("esc", "back"),
 			m.fmtKey("q", "quit"),
 		}
 	} else {
 		parts = []string{
-			m.fmtKey("1/2/tab", "focus"),
+			m.fmtKey("1/2/h/l/tab", "focus"),
 			m.fmtKey("<>", "resize"),
 			m.fmtKey("↑↓/jk", "nav"),
 			m.fmtKey("enter", "logs"),

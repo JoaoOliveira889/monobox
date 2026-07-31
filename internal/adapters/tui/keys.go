@@ -11,9 +11,10 @@ type keyMap struct {
 	Toggle      []string // s — start/stop toggle
 	Restart     []string // r
 	Follow      []string // f — toggle log follow
+	ClearLogs   []string // c — clear log buffer
 	Help        []string // ?
-	Panel1      []string // 1 — focus Containers panel
-	Panel2      []string // 2 — focus Logs panel
+	Panel1      []string // 1, h, left — focus Containers panel
+	Panel2      []string // 2, l, right — focus Logs panel
 	Tab         []string // tab — toggle panel focus
 	ResizeLeft  []string // < or , — move divider left
 	ResizeRight []string // > or . — move divider right
@@ -28,9 +29,10 @@ var keys = keyMap{
 	Toggle:      []string{"s"},
 	Restart:     []string{"r"},
 	Follow:      []string{"f"},
+	ClearLogs:   []string{"c", "ctrl+l"},
 	Help:        []string{"?"},
-	Panel1:      []string{"1"},
-	Panel2:      []string{"2"},
+	Panel1:      []string{"1", "h", "left"},
+	Panel2:      []string{"2", "l", "right"},
 	Tab:         []string{"tab"},
 	ResizeLeft:  []string{"<", ","},
 	ResizeRight: []string{">", "."},
