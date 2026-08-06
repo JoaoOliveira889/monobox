@@ -2,9 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/JoaoOliveira889/monobox/internal/domain"
 )
 
 // Update is the main bubbletea message dispatcher.
@@ -29,6 +32,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.handleContainersLoaded(msg)
 	case containerActionDoneMsg:
 		cmd = m.handleActionDone(msg)
+	case containerLogsClearedMsg:
+		cmd = m.handleContainerLogsCleared(msg)
 	case logStreamOpenedMsg:
 		cmd = m.handleLogStreamOpened(msg)
 	case logLineMsg:
@@ -69,7 +74,7 @@ func (m *Model) handleResize(msg tea.WindowSizeMsg) tea.Cmd {
 	if listInnerW < 0 {
 		listInnerW = 0
 	}
-	logsInnerW := rpW - 3
+	logsInnerW := rpW - 4
 	if logsInnerW < 0 {
 		logsInnerW = 0
 	}
@@ -113,6 +118,7 @@ func (m *Model) handleContainersLoaded(msg containersLoadedMsg) tea.Cmd {
 	}
 
 	m.containers = msg.containers
+	sortContainerItems(m.containers)
 
 	if prevID != "" {
 		for i, c := range m.containers {
@@ -127,6 +133,11 @@ func (m *Model) handleContainersLoaded(msg containersLoadedMsg) tea.Cmd {
 	}
 
 	m.refreshListViewport()
+	if m.stream == nil {
+		if c := m.selectedContainer(); c != nil {
+			return tea.Batch(tickCmd(), m.startLogStream(c.ID))
+		}
+	}
 	return tickCmd()
 }
 
@@ -134,9 +145,21 @@ func (m *Model) handleActionDone(msg containerActionDoneMsg) tea.Cmd {
 	for i, c := range m.containers {
 		if c.ID == msg.id {
 			m.containers[i].loading = false
+			// Optimistic local update: flip status immediately so the UI
+			// reflects the new state before loadContainersCmd returns.
+			if msg.err == nil {
+				switch msg.action {
+				case "stop":
+					m.containers[i].Status = domain.StatusExited
+					m.containers[i].RunningFor = ""
+				case "start", "restart":
+					m.containers[i].Status = domain.StatusRunning
+				}
+			}
 			break
 		}
 	}
+	m.refreshListViewport()
 	if msg.err != nil {
 		m.setStatus(fmt.Sprintf("✗ %s failed: %s", msg.action, msg.err))
 	} else {
@@ -146,22 +169,50 @@ func (m *Model) handleActionDone(msg containerActionDoneMsg) tea.Cmd {
 		}
 		m.setStatus(fmt.Sprintf("✓ %s %s", msg.action, shortID))
 	}
-	return m.loadContainersCmd()
+	// Immediate refresh to get accurate engine state, plus a short-delayed
+	// second pass for engines that update status asynchronously.
+	return tea.Batch(
+		m.loadContainersCmd(),
+		tea.Tick(800*time.Millisecond, func(time.Time) tea.Msg {
+			return tickMsg(time.Now())
+		}),
+	)
+}
+
+func (m *Model) handleContainerLogsCleared(msg containerLogsClearedMsg) tea.Cmd {
+	if msg.err != nil {
+		m.setStatus(fmt.Sprintf("✗ Failed to clear logs: %s", msg.err))
+	} else {
+		m.logLines = nil
+		m.refreshLogViewportContent()
+		m.setStatus(fmt.Sprintf("✓ %s logs cleared", m.engine))
+	}
+	c := m.selectedContainer()
+	if c != nil && c.ID == msg.containerID {
+		return m.startLogStream(c.ID)
+	}
+	return nil
 }
 
 func (m *Model) handleLogStreamOpened(msg logStreamOpenedMsg) tea.Cmd {
+	if msg.containerID != m.logContainerID {
+		msg.cancel()
+		_ = msg.reader.Close()
+		return nil
+	}
 	m.cancelStream()
-	m.logLines = nil
-	sc := newLogScanner(msg.reader)
 	m.stream = &logStream{
 		containerID: msg.containerID,
-		scanner:     sc,
+		reader:      msg.reader,
+		scanner:     msg.scanner,
 		ctx:         msg.ctx,
 		cancel:      msg.cancel,
 	}
-	// Clear log viewport content to show "Reading logs…" placeholder.
-	m.logViewport.SetContent("")
-	return nextLogLineCmd(m.stream.ctx, msg.containerID, sc)
+	m.refreshLogViewportContent()
+	if m.logFollow {
+		m.logViewport.GotoBottom()
+	}
+	return nextLogLineCmd(m.stream.ctx, msg.containerID, m.stream.scanner)
 }
 
 func (m *Model) handleLogLine(msg logLineMsg) tea.Cmd {
@@ -175,20 +226,8 @@ func (m *Model) handleLogLine(msg logLineMsg) tea.Cmd {
 
 func (m *Model) handleLogStreamDone(msg logStreamDoneMsg) {
 	if m.stream != nil && m.stream.containerID == msg.containerID {
+		_ = m.stream.reader.Close()
 		m.stream = nil
 	}
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

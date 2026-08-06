@@ -1,6 +1,11 @@
 package tui
 
-import "time"
+import (
+	"bufio"
+	"context"
+	"io"
+	"time"
+)
 
 type errMsg struct{ Err error }
 
@@ -22,6 +27,21 @@ type containerActionDoneMsg struct {
 	id     string
 	action string
 	err    error
+}
+
+// containerLogsClearedMsg signals completion of engine log file truncation.
+type containerLogsClearedMsg struct {
+	containerID string
+	err         error
+}
+
+// logStreamOpenedMsg carries an opened engine log stream.
+type logStreamOpenedMsg struct {
+	containerID string
+	reader      io.Closer
+	scanner     *bufio.Scanner
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
 // logLineMsg is sent for each new log line arriving from the stream.

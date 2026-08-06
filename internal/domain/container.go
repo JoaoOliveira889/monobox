@@ -24,6 +24,13 @@ const (
 	StatusUnknown ContainerStatus = "unknown"
 )
 
+// ContainerStats holds CPU and memory metrics for a container.
+type ContainerStats struct {
+	CPU     string // e.g. "0.15%"
+	Mem     string // e.g. "45.2MiB / 7.76GiB"
+	MemPerc string // e.g. "0.58%"
+}
+
 // Container holds the information displayed in the list panel.
 type Container struct {
 	ID         string
@@ -32,6 +39,9 @@ type Container struct {
 	Status     ContainerStatus
 	RunningFor string // human-readable uptime, e.g. "5 minutes ago"
 	Engine     Engine
+	CPU        string // e.g. "0.15%"
+	Mem        string // e.g. "45.2MiB / 7.76GiB (0.58%)"
+	Ports      string // e.g. "8080->80/tcp"
 }
 
 // IsRunning reports whether the container is currently running.
@@ -46,6 +56,12 @@ type ContainerProvider interface {
 
 	// List returns all containers (running and stopped).
 	List() ([]Container, error)
+
+	// Stats returns CPU/Mem metrics for active containers mapped by ID/Name.
+	Stats() (map[string]ContainerStats, error)
+
+	// ClearLogs clears the container's log file on the engine daemon.
+	ClearLogs(id string) error
 
 	// Start starts the container with the given ID.
 	Start(id string) error

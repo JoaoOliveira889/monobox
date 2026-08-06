@@ -6,6 +6,10 @@ import (
 
 // handleKeys routes keyboard events to global handlers or panel-specific handlers.
 func (m *Model) handleKeys(msg tea.KeyMsg) tea.Cmd {
+	if m.confirmClearLogs {
+		return m.handleClearLogsConfirmation(msg)
+	}
+
 	// Global quit — always available.
 	if matchesKey(msg, keys.Quit...) {
 		m.quitting = true
@@ -27,9 +31,7 @@ func (m *Model) handleKeys(msg tea.KeyMsg) tea.Cmd {
 		m.logViewport.GotoBottom()
 		c := m.selectedContainer()
 		if c != nil && m.stream == nil {
-			m.logLines = nil
-			m.refreshLogViewportContent()
-			return openLogStreamCmd(m.provider, c.ID)
+			return m.selectAndStreamContainerLogs()
 		}
 		return nil
 	}
@@ -42,9 +44,7 @@ func (m *Model) handleKeys(msg tea.KeyMsg) tea.Cmd {
 			m.logViewport.GotoBottom()
 			c := m.selectedContainer()
 			if c != nil && m.stream == nil {
-				m.logLines = nil
-				m.refreshLogViewportContent()
-				return openLogStreamCmd(m.provider, c.ID)
+				return m.selectAndStreamContainerLogs()
 			}
 		} else {
 			m.activePanel = ListPanel
@@ -68,10 +68,32 @@ func (m *Model) handleKeys(msg tea.KeyMsg) tea.Cmd {
 		return m.handleResize(tea.WindowSizeMsg{Width: m.width, Height: m.height})
 	}
 
+	// Global clear logs — available in all panels
+	if m.activePanel == LogsPanel && matchesKey(msg, keys.ClearLogs...) {
+		c := m.selectedContainer()
+		if c == nil {
+			return nil
+		}
+		m.confirmClearLogs = true
+		return nil
+	}
+
 	if m.activePanel == LogsPanel {
 		return m.handleLogsKeys(msg)
 	}
 	return m.handleListKeys(msg)
+}
+
+// selectAndStreamContainerLogs switches the log stream to the currently selected container.
+func (m *Model) selectAndStreamContainerLogs() tea.Cmd {
+	m.cancelStream()
+	m.logLines = nil
+	m.refreshLogViewportContent()
+	c := m.selectedContainer()
+	if c != nil {
+		return m.startLogStream(c.ID)
+	}
+	return nil
 }
 
 // handleListKeys handles keys when the container list is focused.
@@ -81,12 +103,14 @@ func (m *Model) handleListKeys(msg tea.KeyMsg) tea.Cmd {
 		if m.cursor > 0 {
 			m.cursor--
 			m.refreshListViewport()
+			return m.selectAndStreamContainerLogs()
 		}
 
 	case matchesKey(msg, keys.Down...):
 		if m.cursor < len(m.containers)-1 {
 			m.cursor++
 			m.refreshListViewport()
+			return m.selectAndStreamContainerLogs()
 		}
 
 	case matchesKey(msg, keys.Enter...):
@@ -97,9 +121,7 @@ func (m *Model) handleListKeys(msg tea.KeyMsg) tea.Cmd {
 		}
 		m.activePanel = LogsPanel
 		m.logFollow = true
-		m.logLines = nil
-		m.refreshLogViewportContent()
-		return openLogStreamCmd(m.provider, c.ID)
+		return m.selectAndStreamContainerLogs()
 
 	case matchesKey(msg, keys.Toggle...):
 		// s: start if stopped, stop if running.
@@ -151,18 +173,59 @@ func (m *Model) handleLogsKeys(msg tea.KeyMsg) tea.Cmd {
 			m.setStatus("Follow: OFF")
 		}
 
-	case matchesKey(msg, keys.ClearLogs...):
-		// c / ctrl+l: clear log buffer.
-		m.logLines = nil
-		m.logViewport.SetContent("")
-		m.setStatus("✓ Logs cleared")
-
 	case matchesKey(msg, keys.Up...):
 		m.logViewport.LineUp(1)
 		m.logFollow = false
 
 	case matchesKey(msg, keys.Down...):
 		m.logViewport.LineDown(1)
+		if m.logViewport.AtBottom() {
+			m.logFollow = true
+		}
+
+	case matchesKey(msg, keys.PageUp...):
+		m.logViewport.PageUp()
+		m.logFollow = false
+
+	case matchesKey(msg, keys.PageDown...):
+		m.logViewport.PageDown()
+		if m.logViewport.AtBottom() {
+			m.logFollow = true
+		}
+
+	case matchesKey(msg, keys.End...):
+		m.logViewport.GotoBottom()
+		m.logFollow = true
+	}
+	return nil
+}
+
+func (m *Model) startLogStream(containerID string) tea.Cmd {
+	m.cancelStream()
+	m.logContainerID = containerID
+	tail := m.logViewport.Height
+	if tail <= 0 {
+		tail = logTailLines
+	}
+	if tail > logTailLines {
+		tail = logTailLines
+	}
+	return openLogStreamTailCmd(m.provider, containerID, tail)
+}
+
+func (m *Model) handleClearLogsConfirmation(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "y", "Y":
+		c := m.selectedContainer()
+		m.confirmClearLogs = false
+		if c == nil {
+			return nil
+		}
+		m.cancelStream()
+		m.setStatus("⟳ Clearing " + m.engine + " logs for " + c.Name + "…")
+		return clearContainerLogsCmd(m.provider, c.ID)
+	case "n", "N", "esc":
+		m.confirmClearLogs = false
 	}
 	return nil
 }

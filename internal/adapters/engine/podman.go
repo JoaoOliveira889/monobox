@@ -30,7 +30,57 @@ func (p *PodmanProvider) List() ([]domain.Container, error) {
 	if err != nil {
 		return nil, fmt.Errorf("podman ps: %w", err)
 	}
-	return parseDockerJSON(out, domain.EnginePodman)
+	containers, err := parseDockerJSON(out, domain.EnginePodman)
+	if err != nil {
+		return nil, err
+	}
+
+	if statsMap, err := p.Stats(); err == nil {
+		for i, c := range containers {
+			if st, ok := statsMap[c.ID]; ok {
+				containers[i].CPU = st.CPU
+				if st.MemPerc != "" {
+					containers[i].Mem = fmt.Sprintf("%s (%s)", st.Mem, st.MemPerc)
+				} else {
+					containers[i].Mem = st.Mem
+				}
+			} else if st, ok := statsMap[c.Name]; ok {
+				containers[i].CPU = st.CPU
+				if st.MemPerc != "" {
+					containers[i].Mem = fmt.Sprintf("%s (%s)", st.Mem, st.MemPerc)
+				} else {
+					containers[i].Mem = st.Mem
+				}
+			}
+		}
+	}
+	return containers, nil
+}
+
+// Stats returns metrics for active Podman containers.
+func (p *PodmanProvider) Stats() (map[string]domain.ContainerStats, error) {
+	return engineStats("podman")
+}
+
+// ClearLogs truncates a local Podman log file when its configured log driver
+// exposes a writable path.
+func (p *PodmanProvider) ClearLogs(id string) error {
+	out, err := exec.Command("podman", "inspect", "--format", "{{.HostConfig.LogConfig.Path}}", id).Output()
+	if err != nil {
+		return fmt.Errorf("inspect log path: %w", err)
+	}
+	logPath := strings.TrimSpace(string(out))
+	if logPath == "" || logPath == "<no value>" {
+		out, err = exec.Command("podman", "inspect", "--format", "{{.LogPath}}", id).Output()
+		if err != nil {
+			return fmt.Errorf("inspect log path: %w", err)
+		}
+		logPath = strings.TrimSpace(string(out))
+	}
+	if logPath == "" || logPath == "<no value>" {
+		return fmt.Errorf("no local log path found for container %s", id)
+	}
+	return clearLogFile(logPath)
 }
 
 // Start starts the container with the given ID.

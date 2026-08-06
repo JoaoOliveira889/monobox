@@ -47,19 +47,30 @@ func (m Model) containerActionCmd(id, action string) tea.Cmd {
 	}
 }
 
-// openLogStreamCmd opens a log stream for a container.
-func openLogStreamCmd(p domain.ContainerProvider, containerID string) tea.Cmd {
+// clearContainerLogsCmd truncates the container log file on the engine daemon.
+func clearContainerLogsCmd(p domain.ContainerProvider, containerID string) tea.Cmd {
+	return func() tea.Msg {
+		err := p.ClearLogs(containerID)
+		return containerLogsClearedMsg{containerID: containerID, err: err}
+	}
+}
+
+// openLogStreamTailCmd opens an engine log stream. It never pre-reads the
+// stream: a quiet container would otherwise leave the tab waiting forever.
+func openLogStreamTailCmd(p domain.ContainerProvider, containerID string, tail int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
-		rc, err := p.Logs(ctx, containerID, logTailLines, true)
+		rc, err := p.Logs(ctx, containerID, tail, true)
 		if err != nil {
 			cancel()
 			logging.Error("open log stream", "container", containerID, "err", err)
 			return logStreamDoneMsg{containerID: containerID}
 		}
+
 		return logStreamOpenedMsg{
 			containerID: containerID,
 			reader:      rc,
+			scanner:     newLogScanner(rc),
 			ctx:         ctx,
 			cancel:      cancel,
 		}
@@ -119,12 +130,4 @@ func clearStatusCmd(id int) tea.Cmd {
 	return tea.Tick(statusClearDuration, func(time.Time) tea.Msg {
 		return clearStatusMsg{id: id}
 	})
-}
-
-// logStreamOpenedMsg carries the opened stream back to the model.
-type logStreamOpenedMsg struct {
-	containerID string
-	reader      io.ReadCloser
-	ctx         context.Context
-	cancel      context.CancelFunc
 }

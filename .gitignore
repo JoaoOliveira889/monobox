@@ -1,3 +1,56 @@
+# Binaries
+/monobox
+monobox_test
+*.test
+
+# GoReleaser output
 dist/
-monobox
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Dependencies
+vendor/
+
+# Environment & secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cert
+secrets/
+credentials/
+config.local.*
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+.zed/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+scratch/
+
+# IDE configs (personal — not to be committed)
+.clinerules
+.cursorrules
+
+# Test & coverage artifacts
+coverage.out
+coverage.html
+*.prof
+
+# Logs
 *.log
+*.log.old
+*.tmp

@@ -18,7 +18,11 @@ func (s *stubProvider) EngineName() domain.Engine { return domain.EngineDocker }
 func (s *stubProvider) List() ([]domain.Container, error) {
 	return s.containers, nil
 }
-func (s *stubProvider) Start(_ string) error   { return nil }
+func (s *stubProvider) Stats() (map[string]domain.ContainerStats, error) {
+	return nil, nil
+}
+func (s *stubProvider) ClearLogs(_ string) error { return nil }
+func (s *stubProvider) Start(_ string) error     { return nil }
 func (s *stubProvider) Stop(_ string) error    { return nil }
 func (s *stubProvider) Restart(_ string) error { return nil }
 func (s *stubProvider) Logs(_ context.Context, _ string, _ int, _ bool) (io.ReadCloser, error) {
@@ -71,4 +75,25 @@ func TestCursorBounds(t *testing.T) {
 	if m.Cursor() != 0 {
 		t.Errorf("cursor should clamp to 0, got %d", m.Cursor())
 	}
+}
+
+func TestViewWithPortsAndStats(t *testing.T) {
+	containers := []domain.Container{
+		{
+			ID:     "aaa",
+			Name:   "web",
+			Image:  "nginx",
+			Status: domain.StatusRunning,
+			Engine: domain.EngineDocker,
+			CPU:    "1.50%",
+			Mem:    "100.0MiB / 500MiB",
+			Ports:  "8080->80/tcp",
+		},
+	}
+	stub := &stubProvider{containers: containers}
+	m := tui.NewModel(stub, "docker")
+	m.ApplyContainersLoaded(containers)
+
+	viewStr := m.View()
+	_ = viewStr
 }

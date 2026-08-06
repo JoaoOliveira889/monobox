@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -16,6 +17,9 @@ func (m *Model) View() string {
 	}
 	if m.showSplash {
 		return m.renderSplash()
+	}
+	if m.confirmClearLogs {
+		return m.renderCenteredModal(m.renderClearLogsConfirmation())
 	}
 	if m.width < minTerminalWidth || m.height < minTerminalHeight {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
@@ -119,8 +123,6 @@ func (m *Model) renderHeader() string {
 		} else {
 			loading = ui.SpinnerStyle.Render(m.spinnerView())
 		}
-	} else if m.stream != nil {
-		loading = ui.SpinnerStyle.Render(m.spinnerView() + " Streaming...")
 	}
 
 	brandW := lipgloss.Width(brand)
@@ -179,9 +181,14 @@ func (m *Model) renderHeaderStatusBar() string {
 	var parts []string
 	total := len(m.containers)
 	running, stopped := 0, 0
+	var totalCPU float64
+	var totalMemBytes float64
+
 	for _, c := range m.containers {
 		if c.IsRunning() {
 			running++
+			totalCPU += parseCPUVal(c.CPU)
+			totalMemBytes += parseMemBytesVal(c.Mem)
 		} else {
 			stopped++
 		}
@@ -195,13 +202,17 @@ func (m *Model) renderHeaderStatusBar() string {
 		if stopped > 0 {
 			parts = append(parts, ui.StoppedStyle.Render(fmt.Sprintf("%d stopped", stopped)))
 		}
-		parts = append(parts, ui.SubtleStyle.Render("["+m.engine+"]"))
+		if running > 0 {
+			engName := strings.ToLower(m.engine)
+			if engName == "" {
+				engName = "engine"
+			}
+			engineMetric := fmt.Sprintf("%s: %.2f%% CPU • %s", engName, totalCPU, formatBytes(totalMemBytes))
+			parts = append(parts, lipgloss.NewStyle().Foreground(ui.ColorHighlight).Bold(true).Render(engineMetric))
+		}
 	} else if !m.loading {
 		parts = append(parts, "No containers found")
 	}
-
-	helpHint := ui.LabelStyle.Render("Press q to quit")
-	parts = append(parts, helpHint)
 
 	sep := ui.SubtleStyle.Render("  •  ")
 	barText := " " + dot + " " + strings.Join(parts, sep)
@@ -209,28 +220,108 @@ func (m *Model) renderHeaderStatusBar() string {
 	return ui.SubtleStyle.MaxWidth(maxW).Render(barText)
 }
 
-// renderFooter — matches monogit's footer: key hints left, version right.
+func parseCPUVal(cpuStr string) float64 {
+	cpuStr = strings.TrimSuffix(strings.TrimSpace(cpuStr), "%")
+	val, _ := strconv.ParseFloat(cpuStr, 64)
+	return val
+}
+
+func parseMemBytesVal(memStr string) float64 {
+	if memStr == "" {
+		return 0
+	}
+	parts := strings.Split(memStr, "/")
+	used := strings.TrimSpace(parts[0])
+	usedFields := strings.Fields(used)
+	if len(usedFields) == 0 {
+		return 0
+	}
+	return parseSizeToBytes(usedFields[0])
+}
+
+func parseSizeToBytes(s string) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "N/A" {
+		return 0
+	}
+	var numStr string
+	var unitStr string
+	for i, r := range s {
+		if (r >= '0' && r <= '9') || r == '.' {
+			numStr += string(r)
+		} else {
+			unitStr = strings.TrimSpace(s[i:])
+			break
+		}
+	}
+	val, err := strconv.ParseFloat(numStr, 64)
+	if err != nil {
+		return 0
+	}
+	unitUpper := strings.ToUpper(unitStr)
+	switch {
+	case strings.HasPrefix(unitUpper, "G"):
+		return val * 1024 * 1024 * 1024
+	case strings.HasPrefix(unitUpper, "M"):
+		return val * 1024 * 1024
+	case strings.HasPrefix(unitUpper, "K"):
+		return val * 1024
+	case strings.HasPrefix(unitUpper, "T"):
+		return val * 1024 * 1024 * 1024 * 1024
+	default:
+		return val
+	}
+}
+
+func formatBytes(bytes float64) string {
+	if bytes <= 0 {
+		return "0 B"
+	}
+	const (
+		KiB = 1024.0
+		MiB = KiB * 1024
+		GiB = MiB * 1024
+		TiB = GiB * 1024
+	)
+	switch {
+	case bytes >= TiB:
+		return fmt.Sprintf("%.2f TiB", bytes/TiB)
+	case bytes >= GiB:
+		return fmt.Sprintf("%.2f GiB", bytes/GiB)
+	case bytes >= MiB:
+		return fmt.Sprintf("%.1f MiB", bytes/MiB)
+	case bytes >= KiB:
+		return fmt.Sprintf("%.1f KiB", bytes/KiB)
+	default:
+		return fmt.Sprintf("%.0f B", bytes)
+	}
+}
+
+// renderFooter — key hints left, version right.
 func (m *Model) renderFooter() string {
 	sep := ui.SubtleStyle.Render(" • ")
 	var parts []string
 
 	if m.activePanel == LogsPanel {
+		followAction := "follow:ON"
+		if !m.logFollow {
+			followAction = "follow:OFF"
+		}
 		parts = []string{
-			m.fmtKey("1/2/h/l/tab", "focus"),
-			m.fmtKey("<>", "resize"),
 			m.fmtKey("↑↓/jk", "scroll"),
-			m.fmtKey("f", "follow"),
+			m.fmtKey("pg↑↓/end", "scroll/bottom"),
+			m.fmtKey("f", followAction),
+			m.fmtKey("<>", "resize"),
 			m.fmtKey("c", "clear"),
 			m.fmtKey("esc", "back"),
 			m.fmtKey("q", "quit"),
 		}
 	} else {
 		parts = []string{
-			m.fmtKey("1/2/h/l/tab", "focus"),
-			m.fmtKey("<>", "resize"),
 			m.fmtKey("↑↓/jk", "nav"),
-			m.fmtKey("enter", "logs"),
 			m.fmtKey("s", "start/stop"),
+			m.fmtKey("<>", "resize"),
+			m.fmtKey("enter", "logs"),
 			m.fmtKey("r", "restart"),
 			m.fmtKey("q", "quit"),
 		}
@@ -276,12 +367,7 @@ func (m *Model) fmtKey(k, action string) string {
 
 // renderBody renders the two-panel layout.
 func (m *Model) renderBody() string {
-	headerHeight := 3
-	footerHeight := 1
-	bodyHeight := m.height - headerHeight - footerHeight
-	if bodyHeight < 5 {
-		bodyHeight = 5
-	}
+	bodyHeight := m.panelHeight()
 
 	leftWidth := m.leftPanelWidth()
 	rightWidth := m.rightPanelWidth()
@@ -304,5 +390,15 @@ func (m *Model) renderCenteredModal(content string) string {
 		m.width, m.height,
 		lipgloss.Center, lipgloss.Center,
 		ui.ActivePanelStyle.Padding(1, 2).Render(content),
+	)
+}
+
+func (m *Model) renderClearLogsConfirmation() string {
+	return lipgloss.JoinHorizontal(lipgloss.Center,
+		ui.ValueStyle.Render("Clear logs?"),
+		"  ",
+		m.fmtKey("y", "yes"),
+		"  ",
+		m.fmtKey("n", "no"),
 	)
 }

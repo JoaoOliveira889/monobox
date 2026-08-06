@@ -3,6 +3,8 @@ package tui
 import (
 	"bufio"
 	"context"
+	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -10,7 +12,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/JoaoOliveira889/monobox/internal/domain"
-	"github.com/JoaoOliveira889/monobox/internal/pkg/ui"
 )
 
 // Version is set at build time via ldflags.
@@ -22,7 +23,8 @@ const (
 	// headerHeight = 1 (brand) + 1 (status bar) + 1 (border line)
 	footerOverhead = 4
 
-	logTailLines    = 300
+	logTailLines    = 100
+	logLineLimit    = 100
 	refreshInterval = 5 * time.Second
 
 	statusClearDuration = 3 * time.Second
@@ -36,6 +38,8 @@ const (
 
 	minPanelWidth  = 20
 	minPanelHeight = 5
+
+	containerRowHeight = 1
 )
 
 // Panel identifies which panel is currently focused.
@@ -55,6 +59,7 @@ type containerItem struct {
 // logStream holds everything needed to read from a live log stream.
 type logStream struct {
 	containerID string
+	reader      io.Closer
 	scanner     *bufio.Scanner
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -70,11 +75,14 @@ type Model struct {
 	activePanel Panel
 
 	// log panel state
-	logLines     []string
-	logFollow    bool
-	stream       *logStream
-	logViewport  viewport.Model
-	listViewport viewport.Model
+	logLines       []string
+	logFollow      bool
+	stream         *logStream
+	logContainerID string
+	logViewport    viewport.Model
+	listViewport   viewport.Model
+
+	confirmClearLogs bool
 
 	// layout
 	width          int
@@ -98,7 +106,6 @@ type Model struct {
 
 // NewModel returns an initialized Model ready for bubbletea.
 func NewModel(provider domain.ContainerProvider, engineName string) Model {
-	ui.ApplyTheme("Tokyo Night")
 	return Model{
 		provider:       provider,
 		engine:         engineName,
@@ -161,14 +168,15 @@ func (m *Model) setStatus(msg string) {
 func (m *Model) cancelStream() {
 	if m.stream != nil {
 		m.stream.cancel()
+		_ = m.stream.reader.Close()
 		m.stream = nil
 	}
 }
 
 func (m *Model) appendLogLine(line string) {
 	m.logLines = append(m.logLines, line)
-	if len(m.logLines) > 5000 {
-		m.logLines = m.logLines[len(m.logLines)-5000:]
+	if len(m.logLines) > logLineLimit {
+		m.logLines = m.logLines[len(m.logLines)-logLineLimit:]
 	}
 }
 
@@ -180,10 +188,27 @@ func (m *Model) spinnerView() string {
 
 func (m *Model) refreshListViewport() {
 	m.listViewport.SetContent(m.renderContainerListContent())
+	m.ensureSelectedContainerVisible()
+}
+
+func (m *Model) ensureSelectedContainerVisible() {
+	if m.listViewport.Height <= 0 || len(m.containers) == 0 {
+		return
+	}
+	rowTop := m.cursor * containerRowHeight
+	rowBottom := rowTop + containerRowHeight - 1
+	viewTop := m.listViewport.YOffset
+	viewBottom := viewTop + m.listViewport.Height - 1
+	if rowTop < viewTop {
+		m.listViewport.SetYOffset(rowTop)
+	} else if rowBottom > viewBottom {
+		m.listViewport.SetYOffset(rowBottom - m.listViewport.Height + 1)
+	}
 }
 
 func (m *Model) refreshLogViewportContent() {
 	if len(m.logLines) == 0 {
+		m.logViewport.SetContent("")
 		return
 	}
 	m.logViewport.SetContent(strings.Join(m.logLines, "\n"))
@@ -201,6 +226,32 @@ func (m Model) Cursor() int        { return m.cursor }
 func (m Model) LogFollow() bool    { return m.logFollow }
 func (m *Model) SetCursor(i int)   { m.cursor = i }
 
+func statusRank(status domain.ContainerStatus) int {
+	switch status {
+	case domain.StatusRunning:
+		return 0
+	case domain.StatusPaused:
+		return 1
+	case domain.StatusCreated:
+		return 2
+	case domain.StatusExited:
+		return 3
+	default:
+		return 4
+	}
+}
+
+func sortContainerItems(items []containerItem) {
+	sort.SliceStable(items, func(i, j int) bool {
+		iRank := statusRank(items[i].Status)
+		jRank := statusRank(items[j].Status)
+		if iRank != jRank {
+			return iRank < jRank
+		}
+		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
+	})
+}
+
 func (m *Model) ApplyContainersLoaded(list []domain.Container) {
 	var prevID string
 	if c := m.selectedContainer(); c != nil {
@@ -210,6 +261,7 @@ func (m *Model) ApplyContainersLoaded(list []domain.Container) {
 	for i, c := range list {
 		items[i] = containerItem{Container: c}
 	}
+	sortContainerItems(items)
 	m.containers = items
 	if prevID != "" {
 		for i, c := range m.containers {

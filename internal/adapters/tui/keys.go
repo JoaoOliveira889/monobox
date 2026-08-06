@@ -12,6 +12,9 @@ type keyMap struct {
 	Restart     []string // r
 	Follow      []string // f — toggle log follow
 	ClearLogs   []string // c — clear log buffer
+	PageUp      []string
+	PageDown    []string
+	End         []string
 	Help        []string // ?
 	Panel1      []string // 1, h, left — focus Containers panel
 	Panel2      []string // 2, l, right — focus Logs panel
@@ -30,6 +33,9 @@ var keys = keyMap{
 	Restart:     []string{"r"},
 	Follow:      []string{"f"},
 	ClearLogs:   []string{"c", "ctrl+l"},
+	PageUp:      []string{"pgup", "ctrl+u"},
+	PageDown:    []string{"pgdown", "ctrl+d"},
+	End:         []string{"end", "G"},
 	Help:        []string{"?"},
 	Panel1:      []string{"1", "h", "left"},
 	Panel2:      []string{"2", "l", "right"},
