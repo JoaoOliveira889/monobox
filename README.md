@@ -4,7 +4,7 @@
   <a href="https://github.com/JoaoOliveira889/monobox/releases/latest"><img src="https://img.shields.io/github/v/release/JoaoOliveira889/monobox?color=7aa2f7&label=tag&logo=github&style=flat-square" alt="Latest Tag"></a>
   <a href="https://github.com/JoaoOliveira889/monobox/releases/latest"><img src="https://img.shields.io/github/downloads/JoaoOliveira889/monobox/total?color=9ece6a&label=downloads&logo=github&style=flat-square" alt="Total Downloads"></a>
   <a href="https://goreportcard.com/report/github.com/JoaoOliveira889/monobox"><img src="https://goreportcard.com/badge/github.com/JoaoOliveira889/monobox?style=flat-square" alt="Go Report Card"></a>
-  <a href="https://github.com/JoaoOliveira889/homebrew-tap"><img src="https://img.shields.io/badge/homebrew-v0.0.1-b8ff3d?logo=homebrew&style=flat-square" alt="Homebrew Version"></a>
+  <a href="https://github.com/JoaoOliveira889/homebrew-tap"><img src="https://img.shields.io/badge/homebrew-v0.0.2-b8ff3d?logo=homebrew&style=flat-square" alt="Homebrew Version"></a>
 </p>
 
 <p align="center">

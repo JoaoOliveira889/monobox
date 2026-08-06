@@ -22,7 +22,7 @@ builds:
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
-      - -X main.commit={{.Commit}}
+      - -X main.commit={{.CommitShort}}
       - -X main.date={{.Date}}
 
 archives:
@@ -43,27 +43,20 @@ checksum:
 
 changelog:
   sort: asc
+  use: github
   filters:
     exclude:
       - "^docs:"
       - "^test:"
       - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
 
 release:
   github:
     owner: JoaoOliveira889
     name: monobox
-
-brews:
-  - name: monobox
-    homepage: https://github.com/JoaoOliveira889/monobox
-    description: "Terminal UI for Docker and Podman containers"
-    license: MIT
-    repository:
-      owner: JoaoOliveira889
-      name: homebrew-tap
-    directory: Formula
-    install: |
-      bin.install "monobox"
-    test: |
-      system "#{bin}/monobox", "--version"
+  name_template: "v{{ .Version }}"
+  draft: false
+  prerelease: auto

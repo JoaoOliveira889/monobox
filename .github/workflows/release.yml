@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: GoReleaser
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  homebrew:
+    name: Update Homebrew Formula
+    runs-on: ubuntu-latest
+    needs: release
+
+    steps:
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: JoaoOliveira889/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Compute checksums and update formula
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+
+          ARM_URL="https://github.com/JoaoOliveira889/monobox/releases/download/${TAG}/monobox_${VERSION}_darwin_arm64.tar.gz"
+          AMD_URL="https://github.com/JoaoOliveira889/monobox/releases/download/${TAG}/monobox_${VERSION}_darwin_amd64.tar.gz"
+          LIN_URL="https://github.com/JoaoOliveira889/monobox/releases/download/${TAG}/monobox_${VERSION}_linux_amd64.tar.gz"
+          LIN_ARM_URL="https://github.com/JoaoOliveira889/monobox/releases/download/${TAG}/monobox_${VERSION}_linux_arm64.tar.gz"
+
+          ARM_SHA=$(curl -sL "$ARM_URL" | sha256sum | awk '{print $1}')
+          AMD_SHA=$(curl -sL "$AMD_URL" | sha256sum | awk '{print $1}')
+          LIN_SHA=$(curl -sL "$LIN_URL" | sha256sum | awk '{print $1}')
+          LIN_ARM_SHA=$(curl -sL "$LIN_ARM_URL" | sha256sum | awk '{print $1}')
+
+          mkdir -p homebrew-tap/Formula
+          cat > homebrew-tap/Formula/monobox.rb <<EOF
+          class Monobox < Formula
+            desc "Terminal UI for Docker and Podman containers"
+            homepage "https://github.com/JoaoOliveira889/monobox"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              on_arm do
+                url "${ARM_URL}"
+                sha256 "${ARM_SHA}"
+              end
+              on_intel do
+                url "${AMD_URL}"
+                sha256 "${AMD_SHA}"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "${LIN_ARM_URL}"
+                sha256 "${LIN_ARM_SHA}"
+              end
+              on_intel do
+                url "${LIN_URL}"
+                sha256 "${LIN_SHA}"
+              end
+            end
+
+            def install
+              bin.install "monobox"
+            end
+
+            test do
+              system "#{bin}/monobox", "--version"
+            end
+          end
+          EOF
+
+      - name: Commit and push formula
+        run: |
+          cd homebrew-tap
+          git config user.name  "goreleaserbot"
+          git config user.email "bot@goreleaser.com"
+          git add Formula/monobox.rb
+          git commit -m "monobox ${GITHUB_REF_NAME}"
+          git push
