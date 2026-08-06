@@ -33,24 +33,25 @@ Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Lip Gloss]
 ## Layout
 
 ```
-MonoBox                                                    13 containers
-● 13 containers  •  10 running  •  3 stopped  •  docker: 1.08% CPU • 299.0 MiB
-────────────────────────────────────────────────────────────────────────────────
-╭─[1 Containers]──────────╮╭─[2 Container — openfga-migrate]────────────────────╮
-│ 🔧 idez-account-grpc-1  ●RUNNING ││  NAME:      openfga-migrate                       │
-│ 🔧 idez-holder-grpc-1   ●RUNNING ││  TYPE:      🔐  Auth Service                      │
-│ 🐘 idez-postgres        ●RUNNING ││  IMAGE:     openfga/openfga:latest                │
-│ 🔧 idez-tenant-grpc-1   ●RUNNING ││  PORTS:     none                                  │
-│ 🔧 idez-user-grpc-1     ●RUNNING ││  STATUS:    ○ STOPPED (5 weeks ago)               │
-│ 🔧 idez-users-api-1     ●RUNNING ││  ENGINE:    docker                                │
-│ ☁️ ministack            ●RUNNING ││  ID:        f699679e5fa6                           │
-│ 🔐 openfga              ●RUNNING ││                                                    │
-│ 🐘 openfga-postgres     ●RUNNING ││  ACTIONS & LOGS:                                   │
-│ ⚡ redis-local           ●RUNNING ││   ▸ Press Enter / l / 2 to open live log stream   │
-│ 🔧 idez-device-grpc-1   ○STOPPED ││   ▸ Press s to start container                    │
-│ 🔧 idez-shortcode-grpc-1 ○STOPPED ││   ▸ Press r to restart container                 │
-│▌🔐 openfga-migrate       ○STOPPED │╰───────────────────────────────────────────────────╯
-╰──────────────────────────────────╯
+MonoBox                                                      8 containers
+● 8 containers  •  6 running  •  2 stopped  •  docker: 1.2% CPU • 312.4 MiB
+────────────────────────────────────────────────────────────────────────────
+╭─[1 Containers]──────────────────╮╭─[2 Container — cache]──────────────────╮
+│ 🔧 api-gateway          ●RUNNING ││  NAME:      cache                       │
+│ 🔐 auth-service         ●RUNNING ││  TYPE:      ⚡  Redis                    │
+│ ☁️  localstack          ●RUNNING ││  IMAGE:     redis:7-alpine              │
+│ 📬 message-queue        ●RUNNING ││  PORTS:     6379→6379/tcp               │
+│ 🐘 postgres             ●RUNNING ││  STATUS:    ● RUNNING (2 hours)         │
+│ ⚡  cache               ●RUNNING ││  ENGINE:    docker                      │
+│ 🔧 worker-1             ○STOPPED ││  ID:        a3f1c2d4e5b6                │
+│▌🔧 worker-2             ○STOPPED │││  CPU:       0.02%                      │
+╰──────────────────────────────────╯│  MEMORY:    8.4MiB / 256MiB (3.3%)     │
+                                    │                                         │
+                                    │  ACTIONS & LOGS:                        │
+                                    │   ▸ Enter / l / 2 to open log stream   │
+                                    │   ▸ s to stop container                 │
+                                    │   ▸ r to restart container              │
+                                    ╰─────────────────────────────────────────╯
 ↑↓/jk nav  •  s start/stop  •  <> resize  •  enter logs  •  r restart  •  q quit   monobox 0.0.1
 ```
 
