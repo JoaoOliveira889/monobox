@@ -10,7 +10,6 @@ import (
 	"github.com/JoaoOliveira889/monobox/internal/domain"
 )
 
-// Update is the main bubbletea message dispatcher.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	oldStatus := m.statusMsg
 	var cmd tea.Cmd
@@ -32,8 +31,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.handleContainersLoaded(msg)
 	case containerActionDoneMsg:
 		cmd = m.handleActionDone(msg)
+	case batchActionDoneMsg:
+		cmd = m.handleBatchActionDone(msg)
 	case containerLogsClearedMsg:
 		cmd = m.handleContainerLogsCleared(msg)
+	case inspectDoneMsg:
+		cmd = m.handleInspectDone(msg)
+	case execDoneMsg:
+		cmd = m.handleExecDone(msg)
 	case logStreamOpenedMsg:
 		cmd = m.handleLogStreamOpened(msg)
 	case logLineMsg:
@@ -48,7 +53,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.handleKeys(msg)
 	}
 
-	// Schedule auto-clear for new status messages.
 	if m.statusMsg != "" && m.statusMsg != oldStatus {
 		m.statusMsgID++
 		cmd = tea.Batch(cmd, clearStatusCmd(m.statusMsgID))
@@ -97,56 +101,88 @@ func (m *Model) handleResize(msg tea.WindowSizeMsg) tea.Cmd {
 		m.logViewport.Height = innerHeight
 	}
 
+	w := m.width - 8
+	if w < 20 {
+		w = 20
+	}
+	h := m.height - 8
+	if h < 5 {
+		h = 5
+	}
+	m.inspectViewport.Width = w
+	m.inspectViewport.Height = h
+
 	m.refreshListViewport()
 	m.refreshLogViewportContent()
 	return nil
 }
 
+func (m *Model) handleInspectDone(msg inspectDoneMsg) tea.Cmd {
+	if msg.err != nil {
+		m.setStatus(fmt.Sprintf("✗ Inspect failed: %s", msg.err))
+		return nil
+	}
+	if details, err := domain.ParseInspectDetails(msg.content); err == nil {
+		if m.inspectDetailsCache == nil {
+			m.inspectDetailsCache = make(map[string]*domain.ContainerInspectDetails)
+		}
+		m.inspectDetailsCache[msg.containerID] = details
+	}
+	m.showInspect = true
+	m.inspectContent = msg.content
+	w := m.width - 8
+	if w < 20 {
+		w = 20
+	}
+	h := m.height - 8
+	if h < 5 {
+		h = 5
+	}
+	m.inspectViewport = viewport.New(w, h)
+	m.inspectViewport.SetContent(msg.content)
+	return nil
+}
+
+func (m *Model) handleExecDone(msg execDoneMsg) tea.Cmd {
+	if msg.err != nil {
+		m.setStatus(fmt.Sprintf("✗ Shell exited: %s", msg.err))
+	} else {
+		m.setStatus("✓ Shell session closed")
+	}
+	return m.loadContainersCmd()
+}
+
 func (m *Model) handleContainersLoaded(msg containersLoadedMsg) tea.Cmd {
 	m.loading = false
-	// Hide splash once containers arrive.
 	m.showSplash = false
 
 	if msg.err != nil {
 		m.setStatus(fmt.Sprintf("✗ Error loading containers: %s", msg.err))
-		return tickCmd()
+		return m.tickCmd()
 	}
 
-	var prevID string
-	if c := m.selectedContainer(); c != nil {
-		prevID = c.ID
-	}
-
-	m.containers = msg.containers
-	sortContainerItems(m.containers)
-
-	if prevID != "" {
-		for i, c := range m.containers {
-			if c.ID == prevID {
-				m.cursor = i
-				break
-			}
+	m.ApplyContainersLoaded(func() []domain.Container {
+		list := make([]domain.Container, len(msg.containers))
+		for i, item := range msg.containers {
+			list[i] = item.Container
 		}
-	}
-	if m.cursor >= len(m.containers) {
-		m.cursor = max(0, len(m.containers)-1)
-	}
+		return list
+	}())
 
 	m.refreshListViewport()
 	if m.stream == nil {
 		if c := m.selectedContainer(); c != nil {
-			return tea.Batch(tickCmd(), m.startLogStream(c.ID))
+			return tea.Batch(m.tickCmd(), m.startLogStream(c.ID))
 		}
 	}
-	return tickCmd()
+	return m.tickCmd()
 }
 
 func (m *Model) handleActionDone(msg containerActionDoneMsg) tea.Cmd {
 	for i, c := range m.containers {
 		if c.ID == msg.id {
 			m.containers[i].loading = false
-			// Optimistic local update: flip status immediately so the UI
-			// reflects the new state before loadContainersCmd returns.
+			m.containers[i].starting = false
 			if msg.err == nil {
 				switch msg.action {
 				case "stop":
@@ -169,8 +205,30 @@ func (m *Model) handleActionDone(msg containerActionDoneMsg) tea.Cmd {
 		}
 		m.setStatus(fmt.Sprintf("✓ %s %s", msg.action, shortID))
 	}
-	// Immediate refresh to get accurate engine state, plus a short-delayed
-	// second pass for engines that update status asynchronously.
+	return tea.Batch(
+		m.loadContainersCmd(),
+		tea.Tick(800*time.Millisecond, func(time.Time) tea.Msg {
+			return tickMsg(time.Now())
+		}),
+	)
+}
+
+func (m *Model) handleBatchActionDone(msg batchActionDoneMsg) tea.Cmd {
+	for i, c := range m.containers {
+		if c.ComposeProject == msg.projectName {
+			m.containers[i].loading = false
+		}
+	}
+	m.refreshListViewport()
+
+	if msg.err != nil && msg.success == 0 {
+		m.setStatus(fmt.Sprintf("✗ batch %s failed for %s: %s", msg.action, msg.projectName, msg.err))
+	} else if msg.err != nil {
+		m.setStatus(fmt.Sprintf("⚠ batch %s for %s (%d/%d succeeded): %s", msg.action, msg.projectName, msg.success, msg.count, msg.err))
+	} else {
+		m.setStatus(fmt.Sprintf("✓ batch %s completed for %s (%d containers)", msg.action, msg.projectName, msg.count))
+	}
+
 	return tea.Batch(
 		m.loadContainersCmd(),
 		tea.Tick(800*time.Millisecond, func(time.Time) tea.Msg {
@@ -230,4 +288,3 @@ func (m *Model) handleLogStreamDone(msg logStreamDoneMsg) {
 		m.stream = nil
 	}
 }
-

@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"os/exec"
+	"runtime"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,7 +14,6 @@ import (
 	"github.com/JoaoOliveira889/monobox/internal/pkg/logging"
 )
 
-// loadContainersCmd fetches all containers from the engine.
 func (m Model) loadContainersCmd() tea.Cmd {
 	p := m.provider
 	eng := m.engine
@@ -30,7 +31,6 @@ func (m Model) loadContainersCmd() tea.Cmd {
 	}
 }
 
-// containerActionCmd runs a container lifecycle action.
 func (m Model) containerActionCmd(id, action string) tea.Cmd {
 	p := m.provider
 	return func() tea.Msg {
@@ -42,12 +42,78 @@ func (m Model) containerActionCmd(id, action string) tea.Cmd {
 			err = p.Stop(id)
 		case "restart":
 			err = p.Restart(id)
+		case "pause":
+			err = p.Pause(id)
+		case "unpause":
+			err = p.Unpause(id)
+		case "remove":
+			err = p.Remove(id, true)
 		}
 		return containerActionDoneMsg{id: id, action: action, err: err}
 	}
 }
 
-// clearContainerLogsCmd truncates the container log file on the engine daemon.
+func (m Model) batchActionCmd(projectName, action string, containerIDs []string) tea.Cmd {
+	p := m.provider
+	return func() tea.Msg {
+		var lastErr error
+		successCount := 0
+		for _, id := range containerIDs {
+			var err error
+			switch action {
+			case "start":
+				err = p.Start(id)
+			case "stop":
+				err = p.Stop(id)
+			case "restart":
+				err = p.Restart(id)
+			case "pause":
+				err = p.Pause(id)
+			case "unpause":
+				err = p.Unpause(id)
+			case "remove":
+				err = p.Remove(id, true)
+			}
+			if err != nil {
+				lastErr = err
+			} else {
+				successCount++
+			}
+		}
+		return batchActionDoneMsg{
+			projectName: projectName,
+			action:      action,
+			count:       len(containerIDs),
+			success:     successCount,
+			err:         lastErr,
+		}
+	}
+}
+
+func inspectCmd(p domain.ContainerProvider, containerID string) tea.Cmd {
+	return func() tea.Msg {
+		content, err := p.Inspect(containerID)
+		return inspectDoneMsg{containerID: containerID, content: content, err: err}
+	}
+}
+
+func openBrowserCmd(port string) tea.Cmd {
+	return func() tea.Msg {
+		url := "http://localhost:" + port
+		var cmd *exec.Cmd
+		switch runtime.GOOS {
+		case "darwin":
+			cmd = exec.Command("open", url)
+		case "windows":
+			cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+		default:
+			cmd = exec.Command("xdg-open", url)
+		}
+		_ = cmd.Run()
+		return nil
+	}
+}
+
 func clearContainerLogsCmd(p domain.ContainerProvider, containerID string) tea.Cmd {
 	return func() tea.Msg {
 		err := p.ClearLogs(containerID)
@@ -55,18 +121,15 @@ func clearContainerLogsCmd(p domain.ContainerProvider, containerID string) tea.C
 	}
 }
 
-// openLogStreamTailCmd opens an engine log stream. It never pre-reads the
-// stream: a quiet container would otherwise leave the tab waiting forever.
-func openLogStreamTailCmd(p domain.ContainerProvider, containerID string, tail int) tea.Cmd {
+func openLogStreamTailCmd(p domain.ContainerProvider, containerID string, tail int, timestamps bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithCancel(context.Background())
-		rc, err := p.Logs(ctx, containerID, tail, true)
+		rc, err := p.Logs(ctx, containerID, tail, true, timestamps)
 		if err != nil {
 			cancel()
 			logging.Error("open log stream", "container", containerID, "err", err)
 			return logStreamDoneMsg{containerID: containerID}
 		}
-
 		return logStreamOpenedMsg{
 			containerID: containerID,
 			reader:      rc,
@@ -77,8 +140,6 @@ func openLogStreamTailCmd(p domain.ContainerProvider, containerID string, tail i
 	}
 }
 
-// nextLogLineCmd reads the next line from the scanner and emits it.
-// Uses a large buffer to handle long log lines (e.g. JSON logs).
 func nextLogLineCmd(ctx context.Context, containerID string, sc *bufio.Scanner) tea.Cmd {
 	return func() tea.Msg {
 		select {
@@ -96,36 +157,35 @@ func nextLogLineCmd(ctx context.Context, containerID string, sc *bufio.Scanner) 
 	}
 }
 
-// newLogScanner creates a bufio.Scanner with a 1MB token buffer for large log lines.
 func newLogScanner(r io.Reader) *bufio.Scanner {
 	sc := bufio.NewScanner(r)
-	buf := make([]byte, 1024*1024) // 1 MB buffer
+	buf := make([]byte, 1024*1024)
 	sc.Buffer(buf, 1024*1024)
 	return sc
 }
 
-// spinnerTickCmd schedules the next spinner frame.
 func spinnerTickCmd() tea.Cmd {
 	return tea.Tick(spinnerTickInterval, func(time.Time) tea.Msg {
 		return spinnerTickMsg{}
 	})
 }
 
-// splashTickCmd drives the splash screen animation.
 func splashTickCmd() tea.Cmd {
 	return tea.Tick(90*time.Millisecond, func(time.Time) tea.Msg {
 		return splashTickMsg{}
 	})
 }
 
-// tickCmd schedules periodic container list refresh.
-func tickCmd() tea.Cmd {
-	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg {
+func (m Model) tickCmd() tea.Cmd {
+	interval := m.refreshInterval
+	if interval <= 0 {
+		interval = refreshInterval
+	}
+	return tea.Tick(interval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
 
-// clearStatusCmd clears the status bar after statusClearDuration.
 func clearStatusCmd(id int) tea.Cmd {
 	return tea.Tick(statusClearDuration, func(time.Time) tea.Msg {
 		return clearStatusMsg{id: id}

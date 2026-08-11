@@ -4,11 +4,11 @@
   <a href="https://github.com/JoaoOliveira889/monobox/releases/latest"><img src="https://img.shields.io/github/v/release/JoaoOliveira889/monobox?color=7aa2f7&label=tag&logo=github&style=flat-square" alt="Latest Tag"></a>
   <a href="https://github.com/JoaoOliveira889/monobox/releases/latest"><img src="https://img.shields.io/github/downloads/JoaoOliveira889/monobox/total?color=9ece6a&label=downloads&logo=github&style=flat-square" alt="Total Downloads"></a>
   <a href="https://goreportcard.com/report/github.com/JoaoOliveira889/monobox"><img src="https://goreportcard.com/badge/github.com/JoaoOliveira889/monobox?style=flat-square" alt="Go Report Card"></a>
-  <a href="https://github.com/JoaoOliveira889/homebrew-tap"><img src="https://img.shields.io/badge/homebrew-v0.0.2-b8ff3d?logo=homebrew&style=flat-square" alt="Homebrew Version"></a>
+  <a href="https://github.com/JoaoOliveira889/homebrew-tap"><img src="https://img.shields.io/badge/homebrew-v0.0.3-b8ff3d?logo=homebrew&style=flat-square" alt="Homebrew Version"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/JoaoOliveira889/monobox"><strong>MonoBox v0.0.1 · JoaoOliveira889/monobox</strong></a>
+  <a href="https://github.com/JoaoOliveira889/monobox"><strong>MonoBox v0.0.3 · JoaoOliveira889/monobox</strong></a>
 </p>
 
 **Terminal UI for Docker and Podman containers.** A TUI tool that lists all your containers with live status, log streaming, and one-key lifecycle actions — with confirmation guards for every mutating command.
@@ -21,93 +21,15 @@ Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Lip Gloss]
 
 - **Auto-detect engine** — Docker first, then Podman; clear error if neither is available
 - **Container list** — icon per service type, name, status badge, and uptime
-- **Live log streaming** — real-time `docker logs -f` / `podman logs -f` with follow mode
-- **Lifecycle actions** — start/stop toggle and restart with optimistic UI updates
-- **Clear logs** — truncate engine log file with confirmation guard
-- **Responsive layout** — resizable split panels, adapts to small terminals
-- **Tokyo Night theme** — and 5 more built-in themes (Dracula, Nord, Gruvbox, Monokai, One Dark)
+- **Live log streaming** — real-time `docker logs -f` / `podman logs -f` with follow mode and log export (`s` / `Ctrl+S`)
+- **Lifecycle actions** — start/stop toggle, pause/unpause, and restart with optimistic UI updates
+- **Interactive Theme Menu (`T`)** — switch themes in real time (Tokyo Night, Dracula, Nord, Gruvbox, Monokai, One Dark)
+- **User Config (`~/.config/monobox/config.yaml`)** — persist default theme, metrics refresh interval, log line limits & timestamps
+- **Container Inspection DX (`E` & `H`)** — interactive Environment Variables modal (`E`), Healthcheck probe logs modal (`H`), Mounts & Network details
+- **Metrics & High-Load Alerts (`⚡` / `🔥`)** — visual warning badges when CPU/Memory usage exceeds 80% or 90%
+- **Clean Port Mapping** — deduplicated host-to-container port mapping (e.g. `5115 ➔ 8080/tcp`) and host URL (`http://localhost:5115`)
+- **Categorized Shortcuts (`?`)** — MonoGit-style 2-column shortcuts overlay with scrollable viewport
 - **Security first** — exec with discrete arguments, no shell injection, log file at `0600`
-
----
-
-## Layout
-
-```
-MonoBox                                                      8 containers
-● 8 containers  •  6 running  •  2 stopped  •  docker: 1.2% CPU • 312.4 MiB
-────────────────────────────────────────────────────────────────────────────
-╭─[1 Containers]──────────────────╮╭─[2 Container — cache]──────────────────╮
-│ 🔧 api-gateway          ●RUNNING ││  NAME:      cache                       │
-│ 🔐 auth-service         ●RUNNING ││  TYPE:      ⚡  Redis                    │
-│ ☁️  localstack          ●RUNNING ││  IMAGE:     redis:7-alpine              │
-│ 📬 message-queue        ●RUNNING ││  PORTS:     6379→6379/tcp               │
-│ 🐘 postgres             ●RUNNING ││  STATUS:    ● RUNNING (2 hours)         │
-│ ⚡  cache               ●RUNNING ││  ENGINE:    docker                      │
-│ 🔧 worker-1             ○STOPPED ││  ID:        a3f1c2d4e5b6                │
-│▌🔧 worker-2             ○STOPPED │││  CPU:       0.02%                      │
-╰──────────────────────────────────╯│  MEMORY:    8.4MiB / 256MiB (3.3%)     │
-                                    │                                         │
-                                    │  ACTIONS & LOGS:                        │
-                                    │   ▸ Enter / l / 2 to open log stream   │
-                                    │   ▸ s to stop container                 │
-                                    │   ▸ r to restart container              │
-                                    ╰─────────────────────────────────────────╯
-↑↓/jk nav  •  s start/stop  •  <> resize  •  enter logs  •  r restart  •  q quit   monobox 0.0.1
-```
-
----
-
-## Installation
-
-### Option 1 — Homebrew (macOS & Linux)
-
-```bash
-brew tap JoaoOliveira889/tap
-brew install monobox
-```
-
-### Option 2 — Pre-built binary
-
-Download the latest release from the [Releases page](https://github.com/JoaoOliveira889/monobox/releases/latest).
-
-```bash
-# macOS (Apple Silicon)
-curl -LO https://github.com/JoaoOliveira889/monobox/releases/latest/download/monobox_Darwin_arm64.tar.gz
-tar -xzf monobox_Darwin_arm64.tar.gz
-sudo mv monobox /usr/local/bin/
-
-# Linux (amd64)
-curl -LO https://github.com/JoaoOliveira889/monobox/releases/latest/download/monobox_Linux_x86_64.tar.gz
-tar -xzf monobox_Linux_x86_64.tar.gz
-sudo mv monobox /usr/local/bin/
-```
-
-### Option 3 — `go install`
-
-```bash
-go install github.com/JoaoOliveira889/monobox/cmd/monobox@latest
-```
-
-> Requires Go 1.24 or later.
-
-### Option 4 — Build from source
-
-```bash
-git clone https://github.com/JoaoOliveira889/monobox
-cd monobox
-go build -o monobox ./cmd/monobox
-go install ./cmd/monobox
-```
-
----
-
-## Usage
-
-```bash
-monobox
-```
-
-No flags required. MonoBox auto-detects Docker or Podman on startup.
 
 ---
 
@@ -117,11 +39,13 @@ No flags required. MonoBox auto-detects Docker or Podman on startup.
 
 | Key | Action |
 |-----|--------|
-| `↑` / `k`, `↓` / `j` | Navigate containers |
+| `↑` / `k`, `↓` / `j` | Navigate containers / scroll modal |
 | `←` / `h`, `→` / `l` | Switch panel focus |
 | `1`, `2` | Jump to Containers / Logs panel |
 | `tab` | Toggle panel focus |
 | `<` / `,`, `>` / `.` | Resize panel divider |
+| `T` | Interactive Theme Menu modal |
+| `?` | Shortcuts Help Overlay modal |
 | `q` / `Ctrl+C` | Quit |
 
 ### Container List Panel
@@ -129,8 +53,16 @@ No flags required. MonoBox auto-detects Docker or Podman on startup.
 | Key | Action |
 |-----|--------|
 | `Enter` | Open live log stream |
+| `/` | Real-time container search & filter |
+| `e` / `x` | Exec interactive shell (`/bin/sh`) |
+| `E` | View Environment Variables modal |
+| `H` | View Healthcheck Probe Logs modal |
+| `i` | Inspect container configuration (JSON) |
 | `s` | Start / stop toggle |
+| `p` | Pause / unpause container |
 | `r` | Restart container |
+| `d` / `Delete` | Remove container (confirms with `y` / `n`) |
+| `o` | Open mapped host port in browser (`http://localhost:port`) |
 
 ### Log Panel
 
@@ -141,7 +73,10 @@ No flags required. MonoBox auto-detects Docker or Podman on startup.
 | `PgDn` / `Ctrl+D` | Page down |
 | `End` / `G` | Jump to bottom |
 | `f` | Toggle follow mode |
+| `t` | Toggle log timestamps |
+| `s` / `Ctrl+S` | Export logs to `.log` file |
 | `c` / `Ctrl+L` | Clear engine log history (confirms with `y` / `n`) |
+| `Esc` | Back to container list |
 | `Esc` | Back to container list |
 
 ---

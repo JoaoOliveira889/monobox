@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -16,6 +19,7 @@ type logProvider struct {
 	clearCalls int
 	clearErr   error
 	logsTail   int
+	timestamps bool
 }
 
 func (p *logProvider) EngineName() domain.Engine { return domain.EngineDocker }
@@ -27,11 +31,17 @@ func (p *logProvider) ClearLogs(string) error {
 	p.clearCalls++
 	return p.clearErr
 }
-func (p *logProvider) Start(string) error   { return nil }
-func (p *logProvider) Stop(string) error    { return nil }
-func (p *logProvider) Restart(string) error { return nil }
-func (p *logProvider) Logs(_ context.Context, _ string, tail int, _ bool) (io.ReadCloser, error) {
+func (p *logProvider) Start(string) error            { return nil }
+func (p *logProvider) Stop(string) error             { return nil }
+func (p *logProvider) Restart(string) error          { return nil }
+func (p *logProvider) Pause(string) error            { return nil }
+func (p *logProvider) Unpause(string) error          { return nil }
+func (p *logProvider) Remove(string, bool) error    { return nil }
+func (p *logProvider) Inspect(string) (string, error) { return "{}", nil }
+func (p *logProvider) ExecCmd(string) *exec.Cmd      { return exec.Command("echo", "test") }
+func (p *logProvider) Logs(_ context.Context, _ string, tail int, _, timestamps bool) (io.ReadCloser, error) {
 	p.logsTail = tail
+	p.timestamps = timestamps
 	return io.NopCloser(strings.NewReader("")), nil
 }
 
@@ -125,6 +135,93 @@ func TestLogTailFitsViewport(t *testing.T) {
 	}
 	if m.logContainerID != "container-1" {
 		t.Fatalf("stream container = %q, want container-1", m.logContainerID)
+	}
+}
+
+func TestLogSearchAndHighlight(t *testing.T) {
+	p := &logProvider{}
+	m := NewModel(p, "docker")
+	m.showSplash = false
+	m.activePanel = LogsPanel
+	m.logViewport.Width = 80
+	m.logViewport.Height = 20
+	m.logLines = []string{
+		"2026-08-11 INFO server starting",
+		"2026-08-11 ERROR database connection failed",
+		"2026-08-11 WARN retry attempt 1",
+	}
+
+	m.refreshLogViewportContent()
+	contentAll := m.logViewport.View()
+	if !strings.Contains(contentAll, "ERROR") {
+		t.Fatalf("expected log viewport to contain ERROR")
+	}
+
+	m.logSearchQuery = "database"
+	m.refreshLogViewportContent()
+	contentFiltered := m.logViewport.View()
+	if !strings.Contains(contentFiltered, "database") {
+		t.Fatalf("expected filtered content to contain database")
+	}
+	if strings.Contains(contentFiltered, "retry attempt") {
+		t.Fatalf("filtered content should not contain non-matching log lines")
+	}
+}
+
+func TestExportLogsToFile(t *testing.T) {
+	p := &logProvider{}
+	m := NewModel(p, "docker")
+	m.showSplash = false
+	m.activePanel = LogsPanel
+	m.ApplyContainersLoaded([]domain.Container{{
+		ID: "container-1", Name: "my-app", Status: domain.StatusRunning,
+	}})
+	m.logLines = []string{"line 1", "line 2", "ERROR failed"}
+
+	m.exportLogsToFile()
+	if !strings.HasPrefix(m.statusMsg, "✓ Saved") {
+		t.Fatalf("statusMsg = %q, want saved success message", m.statusMsg)
+	}
+
+	dateStr := time.Now().Format("2006-01-02")
+	expectedFile := "./my-app-logs-" + dateStr + ".log"
+	data, err := os.ReadFile(expectedFile)
+	if err != nil {
+		t.Fatalf("failed to read exported file %s: %v", expectedFile, err)
+	}
+	defer os.Remove(expectedFile)
+
+	if !strings.Contains(string(data), "ERROR failed") {
+		t.Fatalf("exported log file content = %q, missing expected lines", string(data))
+	}
+}
+
+func TestToggleTimestamps(t *testing.T) {
+	p := &logProvider{}
+	m := NewModel(p, "docker")
+	m.showSplash = false
+	m.activePanel = LogsPanel
+	m.ApplyContainersLoaded([]domain.Container{{
+		ID: "container-1", Name: "app", Status: domain.StatusRunning,
+	}})
+
+	if m.showTimestamps {
+		t.Fatal("expected showTimestamps to be false initially")
+	}
+
+	cmd := m.handleLogsKeys(keyMsg("t"))
+	if !m.showTimestamps {
+		t.Fatal("expected showTimestamps to be true after pressing t")
+	}
+	if cmd == nil {
+		t.Fatal("expected command to restart log stream with timestamps")
+	}
+	msg := cmd()
+	if opened, ok := msg.(logStreamOpenedMsg); ok {
+		opened.reader.Close()
+	}
+	if !p.timestamps {
+		t.Fatal("expected logs provider to receive timestamps = true")
 	}
 }
 

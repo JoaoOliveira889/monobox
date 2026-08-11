@@ -8,9 +8,6 @@ import (
 	"github.com/JoaoOliveira889/monobox/internal/domain"
 )
 
-// DetectEngine probes for Docker first, then Podman.
-// Returns the provider, the engine name string, and any error.
-// Returns a descriptive error when neither is available.
 func DetectEngine() (domain.ContainerProvider, string, error) {
 	if p, err := probeDocker(); err == nil {
 		return p, string(domain.EngineDocker), nil
@@ -23,7 +20,6 @@ func DetectEngine() (domain.ContainerProvider, string, error) {
 	)
 }
 
-// probeDocker checks whether docker is in PATH and the daemon is reachable.
 func probeDocker() (domain.ContainerProvider, error) {
 	path, err := exec.LookPath("docker")
 	if err != nil {
@@ -35,7 +31,6 @@ func probeDocker() (domain.ContainerProvider, error) {
 	return NewDockerProvider(), nil
 }
 
-// probePodman checks whether podman is in PATH and the service is reachable.
 func probePodman() (domain.ContainerProvider, error) {
 	path, err := exec.LookPath("podman")
 	if err != nil {

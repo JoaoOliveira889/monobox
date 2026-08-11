@@ -3,7 +3,10 @@ package tui_test
 import (
 	"context"
 	"io"
+	"os/exec"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/JoaoOliveira889/monobox/internal/adapters/tui"
 	"github.com/JoaoOliveira889/monobox/internal/domain"
@@ -25,7 +28,16 @@ func (s *stubProvider) ClearLogs(_ string) error { return nil }
 func (s *stubProvider) Start(_ string) error     { return nil }
 func (s *stubProvider) Stop(_ string) error    { return nil }
 func (s *stubProvider) Restart(_ string) error { return nil }
-func (s *stubProvider) Logs(_ context.Context, _ string, _ int, _ bool) (io.ReadCloser, error) {
+func (s *stubProvider) Pause(_ string) error   { return nil }
+func (s *stubProvider) Unpause(_ string) error { return nil }
+func (s *stubProvider) Remove(_ string, _ bool) error {
+	return nil
+}
+func (s *stubProvider) Inspect(_ string) (string, error) { return "{}", nil }
+func (s *stubProvider) ExecCmd(_ string) *exec.Cmd {
+	return exec.Command("echo", "test")
+}
+func (s *stubProvider) Logs(_ context.Context, _ string, _ int, _ bool, _ bool) (io.ReadCloser, error) {
 	return nil, nil
 }
 
@@ -84,9 +96,10 @@ func TestViewWithPortsAndStats(t *testing.T) {
 			Name:   "web",
 			Image:  "nginx",
 			Status: domain.StatusRunning,
+			Health: domain.HealthHealthy,
 			Engine: domain.EngineDocker,
 			CPU:    "1.50%",
-			Mem:    "100.0MiB / 500MiB",
+			Mem:    "100.0MiB / 500MiB (2.0%)",
 			Ports:  "8080->80/tcp",
 		},
 	}
@@ -97,3 +110,56 @@ func TestViewWithPortsAndStats(t *testing.T) {
 	viewStr := m.View()
 	_ = viewStr
 }
+
+func TestStatsHistoryAccumulation(t *testing.T) {
+	stub := &stubProvider{}
+	m := tui.NewModel(stub, "docker")
+
+	step1 := []domain.Container{
+		{ID: "c1", Name: "app", Status: domain.StatusRunning, CPU: "5.0%", Mem: "100MiB (10.0%)"},
+	}
+	step2 := []domain.Container{
+		{ID: "c1", Name: "app", Status: domain.StatusRunning, CPU: "15.0%", Mem: "120MiB (12.0%)"},
+	}
+
+	m.ApplyContainersLoaded(step1)
+	m.ApplyContainersLoaded(step2)
+
+	cpu, mem := m.GetStatsHistory("c1")
+	if len(cpu) != 2 || cpu[0] != 5.0 || cpu[1] != 15.0 {
+		t.Errorf("unexpected CPU history: %v", cpu)
+	}
+	if len(mem) != 2 || mem[0] != 10.0 || mem[1] != 12.0 {
+		t.Errorf("unexpected Mem history: %v", mem)
+	}
+}
+
+func TestViewWithHealthBadges(t *testing.T) {
+	containers := []domain.Container{
+		{ID: "c1", Name: "healthy-app", Status: domain.StatusRunning, Health: domain.HealthHealthy},
+		{ID: "c2", Name: "unhealthy-app", Status: domain.StatusRunning, Health: domain.HealthUnhealthy},
+		{ID: "c3", Name: "starting-app", Status: domain.StatusRunning, Health: domain.HealthStarting},
+	}
+	stub := &stubProvider{containers: containers}
+	m := tui.NewModel(stub, "docker")
+	m.ApplyContainersLoaded(containers)
+
+	viewStr := m.View()
+	if viewStr == "" {
+		t.Error("expected non-empty view string")
+	}
+}
+
+func TestHelpModalToggle(t *testing.T) {
+	stub := &stubProvider{}
+	m := tui.NewModel(stub, "docker")
+
+	// Simulate pressing '?' key to open help
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	viewStr := m.View()
+	if viewStr == "" {
+		t.Error("expected non-empty help modal view")
+	}
+}
+
+

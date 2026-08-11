@@ -8,40 +8,62 @@ type keyMap struct {
 	Enter       []string
 	Esc         []string
 	Quit        []string
-	Toggle      []string // s — start/stop toggle
-	Restart     []string // r
-	Follow      []string // f — toggle log follow
-	ClearLogs   []string // c — clear log buffer
+	Toggle      []string
+	Restart     []string
+	Follow      []string
+	ClearLogs   []string
 	PageUp      []string
 	PageDown    []string
 	End         []string
-	Help        []string // ?
-	Panel1      []string // 1, h, left — focus Containers panel
-	Panel2      []string // 2, l, right — focus Logs panel
-	Tab         []string // tab — toggle panel focus
-	ResizeLeft  []string // < or , — move divider left
-	ResizeRight []string // > or . — move divider right
+	Help        []string
+	Panel1      []string
+	Panel2      []string
+	Tab         []string
+	ResizeLeft  []string
+	ResizeRight []string
+	Filter      []string
+	Exec        []string
+	Inspect     []string
+	Remove      []string
+	Pause            []string
+	OpenPort         []string
+	SaveLogs         []string
+	ToggleTimestamps []string
+	ThemeMenu        []string
+	EnvModal         []string
+	HealthModal      []string
 }
 
 var keys = keyMap{
-	Up:          []string{"up", "k"},
-	Down:        []string{"down", "j"},
-	Enter:       []string{"enter"},
-	Esc:         []string{"esc"},
-	Quit:        []string{"q", "ctrl+c"},
-	Toggle:      []string{"s"},
-	Restart:     []string{"r"},
-	Follow:      []string{"f"},
-	ClearLogs:   []string{"c", "ctrl+l"},
-	PageUp:      []string{"pgup", "ctrl+u"},
-	PageDown:    []string{"pgdown", "ctrl+d"},
-	End:         []string{"end", "G"},
-	Help:        []string{"?"},
-	Panel1:      []string{"1", "h", "left"},
-	Panel2:      []string{"2", "l", "right"},
-	Tab:         []string{"tab"},
-	ResizeLeft:  []string{"<", ","},
-	ResizeRight: []string{">", "."},
+	Up:               []string{"up", "k"},
+	Down:             []string{"down", "j"},
+	Enter:            []string{"enter"},
+	Esc:              []string{"esc"},
+	Quit:             []string{"q", "ctrl+c"},
+	Toggle:           []string{"s"},
+	Restart:          []string{"r"},
+	Follow:           []string{"f"},
+	ClearLogs:        []string{"c", "ctrl+l"},
+	PageUp:           []string{"pgup", "ctrl+u"},
+	PageDown:         []string{"pgdown", "ctrl+d"},
+	End:              []string{"end", "G"},
+	Help:             []string{"?"},
+	Panel1:           []string{"1", "h", "left"},
+	Panel2:           []string{"2", "l", "right"},
+	Tab:              []string{"tab"},
+	ResizeLeft:       []string{"<", ","},
+	ResizeRight:      []string{">", "."},
+	Filter:           []string{"/"},
+	Exec:             []string{"e", "x"},
+	Inspect:          []string{"i"},
+	Remove:           []string{"d", "delete"},
+	Pause:            []string{"p"},
+	OpenPort:         []string{"o"},
+	SaveLogs:         []string{"ctrl+s", "s"},
+	ToggleTimestamps: []string{"t"},
+	ThemeMenu:        []string{"T"},
+	EnvModal:         []string{"E"},
+	HealthModal:      []string{"H"},
 }
 
 func matchesKey(msg tea.KeyMsg, ks ...string) bool {

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,26 +16,23 @@ import (
 	"github.com/JoaoOliveira889/monobox/internal/domain"
 )
 
-// dockerContainer is the JSON shape returned by "docker ps --format json".
 type dockerContainer struct {
-	ID         string `json:"ID"`
-	Names      string `json:"Names"`
-	Image      string `json:"Image"`
-	State      string `json:"State"`
-	Status     string `json:"Status"`
-	RunningFor string `json:"RunningFor"`
-	Ports      string `json:"Ports"`
+	ID         string          `json:"ID"`
+	Names      string          `json:"Names"`
+	Image      string          `json:"Image"`
+	State      string          `json:"State"`
+	Status     string          `json:"Status"`
+	RunningFor string          `json:"RunningFor"`
+	Ports      string          `json:"Ports"`
+	Labels     json.RawMessage `json:"Labels"`
 }
 
-// DockerProvider implements domain.ContainerProvider for the Docker engine.
 type DockerProvider struct{}
 
-// NewDockerProvider returns a DockerProvider.
 func NewDockerProvider() *DockerProvider { return &DockerProvider{} }
 
 func (d *DockerProvider) EngineName() domain.Engine { return domain.EngineDocker }
 
-// List returns all containers (running + stopped) via "docker ps -a" and fetches stats.
 func (d *DockerProvider) List() ([]domain.Container, error) {
 	out, err := exec.Command(
 		"docker", "ps", "-a",
@@ -48,26 +46,8 @@ func (d *DockerProvider) List() ([]domain.Container, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// Fetch stats for active containers
 	if statsMap, err := d.Stats(); err == nil {
-		for i, c := range containers {
-			if st, ok := statsMap[c.ID]; ok {
-				containers[i].CPU = st.CPU
-				if st.MemPerc != "" {
-					containers[i].Mem = fmt.Sprintf("%s (%s)", st.Mem, st.MemPerc)
-				} else {
-					containers[i].Mem = st.Mem
-				}
-			} else if st, ok := statsMap[c.Name]; ok {
-				containers[i].CPU = st.CPU
-				if st.MemPerc != "" {
-					containers[i].Mem = fmt.Sprintf("%s (%s)", st.Mem, st.MemPerc)
-				} else {
-					containers[i].Mem = st.Mem
-				}
-			}
-		}
+		applyStats(containers, statsMap)
 	}
 	return containers, nil
 }
@@ -80,7 +60,6 @@ type dockerStatsJSON struct {
 	MemPerc  string `json:"MemPerc"`
 }
 
-// Stats queries "docker stats --no-stream" and maps metrics by container ID and Name.
 func (d *DockerProvider) Stats() (map[string]domain.ContainerStats, error) {
 	return engineStats("docker")
 }
@@ -91,7 +70,7 @@ func engineStats(binary string) (map[string]domain.ContainerStats, error) {
 		return nil, err
 	}
 	res := make(map[string]domain.ContainerStats)
-	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	scanner := bufio.NewScanner(bytes.NewReader(out))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -115,9 +94,25 @@ func engineStats(binary string) (map[string]domain.ContainerStats, error) {
 	return res, nil
 }
 
-// ClearLogs truncates a local Docker log file when its driver exposes one.
-// Remote engines and non-file log drivers fail safely instead of pretending to
-// clear output that docker logs would still show.
+func applyStats(containers []domain.Container, statsMap map[string]domain.ContainerStats) {
+	for i, c := range containers {
+		var st domain.ContainerStats
+		var ok bool
+		if st, ok = statsMap[c.ID]; !ok {
+			st, ok = statsMap[c.Name]
+		}
+		if !ok {
+			continue
+		}
+		containers[i].CPU = st.CPU
+		if st.MemPerc != "" {
+			containers[i].Mem = fmt.Sprintf("%s (%s)", st.Mem, st.MemPerc)
+		} else {
+			containers[i].Mem = st.Mem
+		}
+	}
+}
+
 func (d *DockerProvider) ClearLogs(id string) error {
 	out, err := exec.Command("docker", "inspect", "--format", "{{.LogPath}}", id).Output()
 	if err != nil {
@@ -132,10 +127,6 @@ func (d *DockerProvider) ClearLogs(id string) error {
 	} else if !isDockerJSONLogPath(logPath) {
 		return err
 	}
-
-	// Docker Desktop keeps /var/lib/docker inside its Linux VM. A constrained
-	// helper mounts only that directory, has no network or capabilities, and
-	// executes truncate directly (no shell interpolation).
 	return clearDockerDesktopLog(logPath)
 }
 
@@ -167,32 +158,58 @@ func isDockerJSONLogPath(logPath string) bool {
 		strings.HasSuffix(cleanPath, "-json.log")
 }
 
-// Start starts the container with the given ID.
 func (d *DockerProvider) Start(id string) error {
 	return runCmd("docker", "start", id)
 }
 
-// Stop stops the container with the given ID.
 func (d *DockerProvider) Stop(id string) error {
 	return runCmd("docker", "stop", id)
 }
 
-// Restart restarts the container with the given ID.
 func (d *DockerProvider) Restart(id string) error {
 	return runCmd("docker", "restart", id)
 }
 
-// Logs streams container logs.
-// tail is the number of historic lines (0 = start now).
-// follow controls whether the stream stays open for new output.
-func (d *DockerProvider) Logs(ctx context.Context, id string, tail int, follow bool) (io.ReadCloser, error) {
-	return dockerLogs(ctx, "docker", id, tail, follow)
+func (d *DockerProvider) Pause(id string) error {
+	return runCmd("docker", "pause", id)
 }
 
-// dockerLogs runs the engine's logs command. Its stdout is passed through
-// untouched, so displayed lines are exactly the same bytes as engine logs.
-func dockerLogs(ctx context.Context, binary, id string, tail int, follow bool) (io.ReadCloser, error) {
+func (d *DockerProvider) Unpause(id string) error {
+	return runCmd("docker", "unpause", id)
+}
+
+func (d *DockerProvider) Remove(id string, force bool) error {
+	if force {
+		return runCmd("docker", "rm", "-f", id)
+	}
+	return runCmd("docker", "rm", id)
+}
+
+func (d *DockerProvider) Inspect(id string) (string, error) {
+	out, err := exec.Command("docker", "inspect", id).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("docker inspect %s: %s", id, strings.TrimSpace(string(out)))
+	}
+	var pretty bytes.Buffer
+	if jsonErr := json.Indent(&pretty, out, "", "  "); jsonErr == nil {
+		return pretty.String(), nil
+	}
+	return string(out), nil
+}
+
+func (d *DockerProvider) ExecCmd(id string) *exec.Cmd {
+	return exec.Command("docker", "exec", "-it", id, "/bin/sh")
+}
+
+func (d *DockerProvider) Logs(ctx context.Context, id string, tail int, follow bool, timestamps bool) (io.ReadCloser, error) {
+	return dockerLogs(ctx, "docker", id, tail, follow, timestamps)
+}
+
+func dockerLogs(ctx context.Context, binary, id string, tail int, follow bool, timestamps bool) (io.ReadCloser, error) {
 	args := []string{"logs"}
+	if timestamps {
+		args = append(args, "--timestamps")
+	}
 	if follow {
 		args = append(args, "-f")
 	}
@@ -208,11 +225,9 @@ func dockerLogs(ctx context.Context, binary, id string, tail int, follow bool) (
 	if err != nil {
 		return nil, fmt.Errorf("%s logs %s stdout: %w", binary, id, err)
 	}
-
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("%s logs %s: %w", binary, id, err)
 	}
-
 	return &commandLogReader{ReadCloser: stdout, cmd: cmd}, nil
 }
 
@@ -248,10 +263,9 @@ func clearLogFile(logPath string) error {
 	return nil
 }
 
-// parseDockerJSON decodes newline-delimited JSON from "docker ps --format {{json .}}".
 func parseDockerJSON(raw []byte, eng domain.Engine) ([]domain.Container, error) {
 	var containers []domain.Container
-	scanner := bufio.NewScanner(strings.NewReader(string(raw)))
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -261,17 +275,55 @@ func parseDockerJSON(raw []byte, eng domain.Engine) ([]domain.Container, error) 
 		if err := json.Unmarshal([]byte(line), &dc); err != nil {
 			continue
 		}
+		labelsMap, composeProj := parseLabels(dc.Labels)
 		containers = append(containers, domain.Container{
-			ID:         dc.ID,
-			Name:       strings.TrimPrefix(dc.Names, "/"),
-			Image:      dc.Image,
-			Status:     parseDockerState(dc.State),
-			RunningFor: parseRunningFor(dc.Status),
-			Engine:     eng,
-			Ports:      cleanPorts(dc.Ports),
+			ID:             dc.ID,
+			Name:           strings.TrimPrefix(dc.Names, "/"),
+			Image:          dc.Image,
+			Status:         parseDockerState(dc.State),
+			Health:         parseHealthStatus(dc.Status),
+			RunningFor:     parseRunningFor(dc.Status),
+			Engine:         eng,
+			Ports:          cleanPorts(dc.Ports),
+			Labels:         labelsMap,
+			ComposeProject: composeProj,
 		})
 	}
 	return containers, nil
+}
+
+func parseLabels(raw json.RawMessage) (map[string]string, string) {
+	if len(raw) == 0 {
+		return nil, ""
+	}
+	labels := make(map[string]string)
+
+	var str string
+	if err := json.Unmarshal(raw, &str); err == nil {
+		for _, part := range strings.Split(str, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			kv := strings.SplitN(part, "=", 2)
+			if len(kv) == 2 {
+				labels[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
+			} else if len(kv) == 1 {
+				labels[strings.TrimSpace(kv[0])] = ""
+			}
+		}
+	} else {
+		var m map[string]string
+		if err := json.Unmarshal(raw, &m); err == nil {
+			labels = m
+		}
+	}
+
+	composeProj := labels["com.docker.compose.project"]
+	if composeProj == "" {
+		composeProj = labels["io.podman.compose.project"]
+	}
+	return labels, composeProj
 }
 
 func cleanPorts(raw string) string {
@@ -312,8 +364,6 @@ func parseDockerState(state string) domain.ContainerStatus {
 	}
 }
 
-// parseRunningFor extracts a short human-readable uptime from Docker's Status field.
-// "Up 5 minutes" → "5 minutes", "Exited (0) 2 hours ago" → "2 hours ago"
 func parseRunningFor(status string) string {
 	status = strings.TrimSpace(status)
 	lower := strings.ToLower(status)
@@ -329,4 +379,18 @@ func parseRunningFor(status string) string {
 		return strings.Join(parts[len(parts)-3:], " ")
 	}
 	return status
+}
+
+func parseHealthStatus(status string) domain.HealthStatus {
+	lower := strings.ToLower(status)
+	switch {
+	case strings.Contains(lower, "(healthy)"):
+		return domain.HealthHealthy
+	case strings.Contains(lower, "(unhealthy)"):
+		return domain.HealthUnhealthy
+	case strings.Contains(lower, "(health: starting)") || strings.Contains(lower, "(starting)"):
+		return domain.HealthStarting
+	default:
+		return domain.HealthNone
+	}
 }

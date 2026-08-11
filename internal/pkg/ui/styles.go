@@ -65,14 +65,12 @@ var (
 	ValueStyle   lipgloss.Style
 )
 
-// Modal styles
 var (
 	ModalTitleStyle  lipgloss.Style
 	ModalBodyStyle   lipgloss.Style
 	ModalFooterStyle lipgloss.Style
 )
 
-// Status message variants
 var (
 	StatusInfoStyle    lipgloss.Style
 	StatusSuccessStyle lipgloss.Style
@@ -362,7 +360,6 @@ func ApplyTheme(name string) {
 	ValueStyle = lipgloss.NewStyle().
 		Foreground(ColorFg)
 
-	// Modal styles
 	ModalTitleStyle = lipgloss.NewStyle().
 		Foreground(ColorHighlight).
 		Bold(true).
@@ -375,7 +372,6 @@ func ApplyTheme(name string) {
 		Foreground(ColorSubtle).
 		Padding(0, 1)
 
-	// Status message variants
 	StatusInfoStyle = lipgloss.NewStyle().
 		Foreground(ColorHighlight)
 

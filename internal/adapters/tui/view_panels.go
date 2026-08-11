@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -11,10 +12,8 @@ import (
 	"github.com/JoaoOliveira889/monobox/internal/pkg/ui"
 )
 
-const iconWidth = 3 // fixed width (cells) reserved for the emoji icon column (emoji = 2 cells + 1 space)
+const iconWidth = 3
 
-// renderTitledPanel renders a bordered panel with a decorative title in the
-// top border — identical pattern to monogit.
 func (m *Model) renderTitledPanel(width, height int, title, content string, active bool, accent lipgloss.Color) string {
 	borderColor := lipgloss.Color(ui.ColorBorder)
 	if active {
@@ -43,9 +42,6 @@ func (m *Model) renderTitledPanel(width, height int, title, content string, acti
 		titleStyled = ui.SubtleStyle.Render(title)
 	}
 
-	// Exact top line width calculation:
-	// TopLeft (1) + "─[" (2) + title (len) + "]" (1) + Top (repeatCount) + TopRight (1) = width
-	// => repeatCount = width - len(title) - 5
 	titleLen := lipgloss.Width(title)
 	repeatCount := width - titleLen - 5
 	if repeatCount < 0 {
@@ -65,13 +61,9 @@ func (m *Model) renderTitledPanel(width, height int, title, content string, acti
 		innerHeight = 0
 	}
 
-	// Truncate any line wider than innerWidth — lipgloss Width() causes
-	// long lines to wrap into multiple visual lines, adding phantom height
-	// that clampLines cannot see. Zero-width lines are left untouched.
 	if innerWidth > 0 {
 		content = truncateLineWidths(content, innerWidth)
 	}
-	// Clamp height: panel content area must be exactly innerHeight lines.
 	content = clampLines(content, innerHeight)
 
 	panelStyle := lipgloss.NewStyle().
@@ -84,27 +76,47 @@ func (m *Model) renderTitledPanel(width, height int, title, content string, acti
 	return lipgloss.JoinVertical(lipgloss.Left, topLine, panel)
 }
 
-// renderRepoList renders the container list panel (left side).
 func (m *Model) renderRepoList(width, height int) string {
+	filtered := m.FilteredContainers()
 	content := m.listViewport.View()
+
 	if m.loading {
 		content = ui.SpinnerStyle.Render(m.spinnerView() + " Loading containers…")
 	} else if len(m.containers) == 0 {
 		content = ui.SubtleStyle.Render(" No containers found.\n Make sure Docker or Podman is running.")
+	} else if len(filtered) == 0 {
+		content = ui.SubtleStyle.Render(fmt.Sprintf(" No containers matching %q", m.filterQuery))
+	}
+
+	if m.filtering || m.filterQuery != "" {
+		m.filterInput.Width = width - 4
+		filterView := m.filterInput.View()
+		if m.filtering {
+			filterView = lipgloss.NewStyle().Foreground(ui.ColorHighlight).Bold(true).Render(filterView)
+		} else {
+			filterView = ui.SubtleStyle.Render(filterView)
+		}
+		content = lipgloss.JoinVertical(lipgloss.Left, "  "+filterView, content)
 	}
 
 	title := "1 Containers"
+	if m.filterQuery != "" || m.filtering {
+		title = fmt.Sprintf("1 Containers (%d/%d)", len(filtered), len(m.containers))
+	}
 	accent := lipgloss.Color(ui.ColorMono)
 	return m.renderTitledPanel(width, height, title, content, m.activePanel == ListPanel, accent)
 }
 
-// renderContainerListContent renders all container rows inside listViewport.
 func (m *Model) renderContainerListContent() string {
 	if m.loading {
 		return ui.SpinnerStyle.Render(m.spinnerView() + " Loading containers…")
 	}
+	nodes := m.VisibleTreeNodes()
 	if len(m.containers) == 0 {
 		return ui.SubtleStyle.Render(" No containers found.\n Make sure Docker or Podman is running.")
+	}
+	if len(nodes) == 0 {
+		return ui.SubtleStyle.Render(fmt.Sprintf(" No containers matching %q", m.filterQuery))
 	}
 
 	vpWidth := m.listViewport.Width
@@ -113,14 +125,17 @@ func (m *Model) renderContainerListContent() string {
 	}
 
 	var rows []string
-	for i, c := range m.containers {
-		rows = append(rows, m.renderContainerRow(i, c, vpWidth))
+	for i, node := range nodes {
+		if node.Type == NodeProjectHeader {
+			rows = append(rows, m.renderProjectHeaderRow(i, node, vpWidth))
+		} else if node.Container != nil {
+			rows = append(rows, m.renderContainerRow(i, node, vpWidth))
+		}
 	}
 	return strings.Join(rows, "\n")
 }
 
-// renderContainerRow renders a single-line row with name and status.
-func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) string {
+func (m *Model) renderProjectHeaderRow(index int, node TreeNode, maxWidth int) string {
 	selected := index == m.cursor
 	var bgStyle lipgloss.Style
 	if selected {
@@ -134,26 +149,98 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 		prefix = "  "
 	}
 
+	toggleIcon := "[-] "
+	if !node.Expanded {
+		toggleIcon = "[+] "
+	}
+	if selected {
+		toggleIcon = bgStyle.Foreground(ui.ColorBg).Bold(true).Render(toggleIcon)
+	} else {
+		toggleIcon = lipgloss.NewStyle().Foreground(ui.ColorBox).Bold(true).Render(toggleIcon)
+	}
+
+	projName := node.ProjectName
+	if selected {
+		projName = bgStyle.Foreground(ui.ColorBg).Bold(true).Render(projName)
+	} else {
+		projName = lipgloss.NewStyle().Foreground(ui.ColorFg).Bold(true).Render(projName)
+	}
+
+	badge := fmt.Sprintf("(%d containers)", node.TotalCount)
+	if node.RunningCount > 0 {
+		badge = fmt.Sprintf("(%d/%d running)", node.RunningCount, node.TotalCount)
+	}
+	if selected {
+		badge = bgStyle.Foreground(ui.ColorBg).Render(" " + badge)
+	} else {
+		badge = ui.SubtleStyle.Render(" " + badge)
+	}
+
+	left := prefix + toggleIcon + projName + badge
+	leftWidth := lipgloss.Width(left)
+
+	if leftWidth < maxWidth {
+		padding := strings.Repeat(" ", maxWidth-leftWidth)
+		if selected {
+			left += bgStyle.Render(padding)
+		} else {
+			left += padding
+		}
+	} else if leftWidth > maxWidth {
+		left = truncateRunes(left, maxWidth)
+	}
+	return left
+}
+
+func (m *Model) renderContainerRow(index int, node TreeNode, maxWidth int) string {
+	c := *node.Container
+	selected := index == m.cursor
+	var bgStyle lipgloss.Style
+	if selected {
+		bgStyle = lipgloss.NewStyle().Background(ui.ColorHighlight)
+	}
+
+	var prefix string
+	if selected {
+		prefix = bgStyle.Foreground(ui.ColorBg).Render("▌ ")
+	} else {
+		prefix = "  "
+	}
+
+	var treeBranch string
+	if node.ProjectName != "" {
+		if node.IsLastInGroup {
+			treeBranch = "└─ "
+		} else {
+			treeBranch = "├─ "
+		}
+		if selected {
+			treeBranch = bgStyle.Foreground(ui.ColorBg).Render(treeBranch)
+		} else {
+			treeBranch = ui.SubtleStyle.Render(treeBranch)
+		}
+	}
+
 	iconStr, _ := containerIconAndLabel(c.Container)
-	iconStr += " " // 2-cell emoji + 1 space = iconWidth (3 cells)
+	iconStr += " "
 	iconCellWidth := lipgloss.Width(iconStr)
 	if selected {
 		iconStr = bgStyle.Render(iconStr)
 	}
 
-	// Right-aligned status badge
 	var statusBadge string
 	if selected {
-		statusBadge = bgStyle.Foreground(ui.ColorBg).Bold(true).Render(statusBadgeText(c.Container, maxWidth))
+		statusBadge = bgStyle.Foreground(ui.ColorBg).Bold(true).Render(statusBadgeText(c, maxWidth))
 	} else {
-		statusBadge = statusBadgeStyled(c.Container, maxWidth)
+		statusBadge = statusBadgeStyled(c, maxWidth)
 	}
 
 	prefixWidth := lipgloss.Width(prefix)
+	treeWidth := lipgloss.Width(treeBranch)
 	iconCols := iconCellWidth
 	statusWidth := lipgloss.Width(statusBadge)
 
-	availForName := maxWidth - prefixWidth - iconCols - statusWidth - 1
+	availForName := maxWidth - prefixWidth - treeWidth - iconCols - statusWidth - 1
 	if availForName < 3 {
 		availForName = 3
 	}
@@ -170,7 +257,7 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 		nameStr = lipgloss.NewStyle().Foreground(ui.ColorFg).Render(name)
 	}
 
-	leftContent := prefix + iconStr + nameStr
+	leftContent := prefix + treeBranch + iconStr + nameStr
 	leftWidth := lipgloss.Width(leftContent)
 	gapLen := maxWidth - leftWidth - statusWidth
 	if gapLen < 1 {
@@ -197,8 +284,6 @@ func (m *Model) renderContainerRow(index int, c containerItem, maxWidth int) str
 	return row
 }
 
-// containerIconAndLabel returns (icon, label) for a container based on name/image.
-// All icons are 2-cell emoji for consistent terminal alignment.
 func containerIconAndLabel(c domain.Container) (icon, label string) {
 	lower := strings.ToLower(c.Name + " " + c.Image)
 	switch {
@@ -232,7 +317,33 @@ func containerIconAndLabel(c domain.Container) (icon, label string) {
 	}
 }
 
-func statusBadgeText(c domain.Container, maxWidth int) string {
+func statusBadgeText(c containerItem, maxWidth int) string {
+	if c.starting {
+		if maxWidth < 25 {
+			return "⏳ STR..."
+		}
+		return "⏳ STARTING..."
+	}
+	if c.Status == domain.StatusRunning {
+		switch c.Health {
+		case domain.HealthHealthy:
+			if maxWidth < 25 {
+				return "● HLTH"
+			}
+			return "● HEALTHY"
+		case domain.HealthUnhealthy:
+			if maxWidth < 25 {
+				return "✖ UNH"
+			}
+			return "✖ UNHEALTHY"
+		case domain.HealthStarting:
+			if maxWidth < 25 {
+				return "⏳ STR..."
+			}
+			return "⏳ STARTING..."
+		}
+	}
+
 	if maxWidth < 25 {
 		switch c.Status {
 		case domain.StatusRunning:
@@ -259,24 +370,87 @@ func statusBadgeText(c domain.Container, maxWidth int) string {
 	}
 }
 
-func statusBadgeStyled(c domain.Container, maxWidth int) string {
+func parseMemPercVal(memStr string) float64 {
+	if idx := strings.Index(memStr, "("); idx != -1 {
+		end := strings.Index(memStr[idx:], "%)")
+		if end != -1 {
+			sub := memStr[idx+1 : idx+end]
+			val, _ := strconv.ParseFloat(strings.TrimSpace(sub), 64)
+			return val
+		}
+	}
+	return parseCPUVal(memStr)
+}
+
+func statusBadgeStyled(c containerItem, maxWidth int) string {
 	text := statusBadgeText(c, maxWidth)
-	switch c.Status {
-	case domain.StatusRunning:
+	if c.starting {
+		return lipgloss.NewStyle().Foreground(ui.ColorWarning).Bold(true).Render(text)
+	}
+	if c.Status == domain.StatusRunning {
+		cpuFloat := parseCPUVal(c.CPU)
+		memPercFloat := parseMemPercVal(c.Mem)
+		if cpuFloat >= 90.0 || memPercFloat >= 90.0 {
+			return lipgloss.NewStyle().Foreground(ui.ColorError).Bold(true).Render("🔥 CRITICAL")
+		}
+		if cpuFloat >= 80.0 || memPercFloat >= 80.0 {
+			return lipgloss.NewStyle().Foreground(ui.ColorWarning).Bold(true).Render("⚡ HIGH LOAD")
+		}
+		switch c.Health {
+		case domain.HealthHealthy:
+			return lipgloss.NewStyle().Foreground(ui.ColorSuccess).Bold(true).Render(text)
+		case domain.HealthUnhealthy:
+			return lipgloss.NewStyle().Foreground(ui.ColorError).Bold(true).Render(text)
+		case domain.HealthStarting:
+			return lipgloss.NewStyle().Foreground(ui.ColorWarning).Bold(true).Render(text)
+		}
 		return lipgloss.NewStyle().Foreground(ui.ColorSuccess).Bold(true).Render(text)
-	case domain.StatusExited:
-		return ui.SubtleStyle.Render(text)
+	}
+	switch c.Status {
 	case domain.StatusPaused:
 		return lipgloss.NewStyle().Foreground(ui.ColorWarning).Bold(true).Render(text)
-	case domain.StatusCreated:
-		return ui.SubtleStyle.Render(text)
 	default:
 		return ui.SubtleStyle.Render(text)
 	}
 }
 
-// renderDetailPanel renders the detail/log panel (right side).
 func (m *Model) renderDetailPanel(width, height int) string {
+	if node := m.selectedNode(); node != nil && node.Type == NodeProjectHeader {
+		title := "2 Project Stack — " + node.ProjectName
+		var cardLines []string
+		cardLines = append(cardLines, fmt.Sprintf("  %-12s %s", "PROJECT:", ui.ValueStyle.Render(node.ProjectName)))
+		cardLines = append(cardLines, fmt.Sprintf("  %-12s %s", "TYPE:", ui.ValueStyle.Render("📦 Docker Compose Stack")))
+		cardLines = append(cardLines, fmt.Sprintf("  %-12s %s", "CONTAINERS:", ui.ValueStyle.Render(fmt.Sprintf("%d (%d running)", node.TotalCount, node.RunningCount))))
+		cardLines = append(cardLines, fmt.Sprintf("  %-12s %s", "ENGINE:", ui.SubtleStyle.Render(m.engine)))
+
+		divWidth := width - 6
+		if divWidth < 10 {
+			divWidth = 10
+		}
+		cardLines = append(cardLines, "")
+		cardLines = append(cardLines, ui.SubtleStyle.Render("  "+strings.Repeat("─", divWidth)))
+		cardLines = append(cardLines, ui.LabelStyle.Render("  BATCH ACTIONS:"))
+		cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press s to START/STOP all containers in stack"))
+		cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press r to RESTART all containers in stack"))
+		cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press d to REMOVE all containers in stack"))
+		cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press Space / Enter to toggle collapse/expand"))
+
+		cardLines = append(cardLines, "")
+		cardLines = append(cardLines, ui.SubtleStyle.Render("  "+strings.Repeat("─", divWidth)))
+		cardLines = append(cardLines, ui.LabelStyle.Render("  STACK CONTAINERS:"))
+
+		for _, item := range m.containers {
+			if item.ComposeProject == node.ProjectName {
+				statusBadge := statusBadgeStyled(item, width)
+				cardLines = append(cardLines, fmt.Sprintf("   • %-20s %s", item.Name, statusBadge))
+			}
+		}
+
+		content := strings.Join(cardLines, "\n")
+		accent := lipgloss.Color(ui.ColorBox)
+		return m.renderTitledPanel(width, height, title, content, m.activePanel == LogsPanel, accent)
+	}
+
 	c := m.selectedContainer()
 	if c == nil {
 		content := ui.SubtleStyle.Render(" No container selected")
@@ -291,21 +465,40 @@ func (m *Model) renderDetailPanel(width, height int) string {
 		if !m.logFollow {
 			followStatus = "[follow: OFF]"
 		}
+		tsStatus := ""
+		if m.showTimestamps {
+			tsStatus = " [ts: ON]"
+		}
 		liveStatus := ""
 		if m.stream != nil {
 			liveStatus = " [live]"
 		}
-		title = fmt.Sprintf("2 Logs — %s %s%s", c.Name, followStatus, liveStatus)
-		content = renderViewportWithScrollbar(m.logViewport, true)
+		title = fmt.Sprintf("2 Logs — %s %s%s%s", c.Name, followStatus, tsStatus, liveStatus)
+		vpView := renderViewportWithScrollbar(m.logViewport, true)
 		if len(m.logLines) == 0 {
 			if m.stream != nil {
-				content = ui.SubtleStyle.Render(" Waiting for container output…\n Live follow is enabled.")
+				vpView = ui.SubtleStyle.Render(" Waiting for container output…\n Live follow is enabled.")
 			} else {
-				content = ui.SubtleStyle.Render(" No log output received yet.")
+				vpView = ui.SubtleStyle.Render(" No log output received yet.")
 			}
 		}
+
+		if m.logSearching || m.logSearchQuery != "" {
+			m.logSearchInput.Width = width - 4
+			if m.logSearchInput.Width < 10 {
+				m.logSearchInput.Width = 10
+			}
+			searchView := m.logSearchInput.View()
+			if m.logSearching {
+				searchView = lipgloss.NewStyle().Foreground(ui.ColorHighlight).Bold(true).Render(searchView)
+			} else {
+				searchView = ui.SubtleStyle.Render(searchView)
+			}
+			content = lipgloss.JoinVertical(lipgloss.Left, "  "+searchView, vpView)
+		} else {
+			content = vpView
+		}
 	} else {
-		// ListPanel is active: show container detail card + recent logs preview
 		title = "2 Container — " + c.Name
 
 		var cardLines []string
@@ -317,21 +510,68 @@ func (m *Model) renderDetailPanel(width, height int) string {
 
 		cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "IMAGE:", ui.ValueStyle.Render(c.Image)))
 
-		portsVal := c.Ports
-		if portsVal == "" {
-			portsVal = "none"
-		}
-		// Truncate long port strings to fit the panel width.
+		cleanPorts, officialPort := formatCleanPorts(c.Ports)
 		portsMax := width - 14
 		if portsMax < 10 {
 			portsMax = 10
 		}
-		if lipgloss.Width(portsVal) > portsMax {
-			portsVal = truncateRunes(portsVal, portsMax)
+		if lipgloss.Width(cleanPorts) > portsMax {
+			cleanPorts = truncateRunes(cleanPorts, portsMax)
 		}
-		cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "PORTS:", ui.ValueStyle.Render(portsVal)))
+		cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "PORTS:", ui.ValueStyle.Render(cleanPorts)))
+		if officialPort != "" {
+			hostUrl := fmt.Sprintf("http://localhost:%s", officialPort)
+			styledUrl := lipgloss.NewStyle().Foreground(ui.ColorCyan).Bold(true).Render(hostUrl)
+			hint := ui.SubtleStyle.Render(" (press 'o' to open)")
+			cardLines = append(cardLines, fmt.Sprintf("  %-10s %s%s", "URL:", styledUrl, hint))
+		}
 
-		statusStr := statusBadgeStyled(c.Container, width)
+		if details := m.inspectDetailsCache[c.ID]; details != nil {
+			if len(details.Networks) > 0 {
+				var netStrs []string
+				for _, n := range details.Networks {
+					if n.IPAddress != "" {
+						netStrs = append(netStrs, fmt.Sprintf("%s (%s)", n.Name, n.IPAddress))
+					} else {
+						netStrs = append(netStrs, n.Name)
+					}
+				}
+				cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "NETWORKS:", ui.ValueStyle.Render(strings.Join(netStrs, ", "))))
+			}
+
+			if len(details.Mounts) > 0 {
+				var mountStrs []string
+				for _, mnt := range details.Mounts {
+					src := mnt.Source
+					if len(src) > 25 {
+						src = "…" + src[len(src)-24:]
+					}
+					mountStrs = append(mountStrs, fmt.Sprintf("%s ➔ %s (%s)", src, mnt.Destination, mnt.Type))
+				}
+				mountVal := strings.Join(mountStrs, ", ")
+				cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "VOLUMES:", ui.ValueStyle.Render(mountVal)))
+			}
+
+			if len(details.Env) > 0 {
+				envHint := ui.SubtleStyle.Render(" (press 'E' to view)")
+				cardLines = append(cardLines, fmt.Sprintf("  %-10s %s%s", "ENV:", ui.ValueStyle.Render(fmt.Sprintf("%d variables", len(details.Env))), envHint))
+			}
+
+			if details.Health != nil {
+				hBadge := string(details.Health.Status)
+				if details.Health.Status == domain.HealthHealthy {
+					hBadge = ui.StatusSuccessStyle.Render("● HEALTHY")
+				} else if details.Health.Status == domain.HealthUnhealthy {
+					hBadge = ui.StatusErrorStyle.Render(fmt.Sprintf("✖ UNHEALTHY (Failing streak: %d)", details.Health.FailingStreak))
+				} else if details.Health.Status == domain.HealthStarting {
+					hBadge = ui.StatusWarningStyle.Render("⏳ STARTING")
+				}
+				hHint := ui.SubtleStyle.Render(" (press 'H' for logs)")
+				cardLines = append(cardLines, fmt.Sprintf("  %-10s %s%s", "HEALTH:", hBadge, hHint))
+			}
+		}
+
+		statusStr := statusBadgeStyled(*c, width)
 		if c.RunningFor != "" {
 			statusStr += ui.SubtleStyle.Render(" (" + c.RunningFor + ")")
 		}
@@ -353,8 +593,47 @@ func (m *Model) renderDetailPanel(width, height int) string {
 			if memVal == "" {
 				memVal = "N/A"
 			}
-			cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "CPU:", ui.ValueStyle.Render(cpuVal)))
-			cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "MEMORY:", ui.ValueStyle.Render(memVal)))
+
+			cpuFloat := parseCPUVal(cpuVal)
+			memPercFloat := parseMemPercVal(memVal)
+
+			var cpuStyled string
+			if cpuFloat >= 90.0 {
+				cpuStyled = lipgloss.NewStyle().Foreground(ui.ColorError).Bold(true).Render(fmt.Sprintf("🔥 %s (CRITICAL)", cpuVal))
+			} else if cpuFloat >= 80.0 {
+				cpuStyled = lipgloss.NewStyle().Foreground(ui.ColorWarning).Bold(true).Render(fmt.Sprintf("⚡ %s (HIGH CPU)", cpuVal))
+			} else {
+				cpuStyled = ui.ValueStyle.Render(cpuVal)
+			}
+
+			var memStyled string
+			if memPercFloat >= 90.0 {
+				memStyled = lipgloss.NewStyle().Foreground(ui.ColorError).Bold(true).Render(fmt.Sprintf("🔥 %s (CRITICAL)", memVal))
+			} else if memPercFloat >= 80.0 {
+				memStyled = lipgloss.NewStyle().Foreground(ui.ColorWarning).Bold(true).Render(fmt.Sprintf("⚡ %s (HIGH MEMORY)", memVal))
+			} else {
+				memStyled = ui.ValueStyle.Render(memVal)
+			}
+
+			key := c.ID
+			if key == "" {
+				key = c.Name
+			}
+			cpuHist, memHist := m.GetStatsHistory(key)
+			cpuSpark := ui.RenderSparkline(cpuHist, 12)
+			memSpark := ui.RenderSparkline(memHist, 12)
+
+			cpuLine := fmt.Sprintf("  %-10s %s", "CPU:", cpuStyled)
+			if cpuSpark != "" {
+				cpuLine += "  " + ui.SubtleStyle.Render(cpuSpark)
+			}
+			memLine := fmt.Sprintf("  %-10s %s", "MEMORY:", memStyled)
+			if memSpark != "" {
+				memLine += "  " + ui.SubtleStyle.Render(memSpark)
+			}
+
+			cardLines = append(cardLines, cpuLine)
+			cardLines = append(cardLines, memLine)
 		}
 
 		divWidth := width - 6
@@ -366,11 +645,22 @@ func (m *Model) renderDetailPanel(width, height int) string {
 		cardLines = append(cardLines, ui.LabelStyle.Render("  ACTIONS & LOGS:"))
 		cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press Enter / l / 2 to open live log stream"))
 		if c.IsRunning() {
+			cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press e / x to exec shell (/bin/sh)"))
+			cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press E to view Environment Variables"))
+			cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press H to view Healthcheck Logs"))
 			cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press s to stop container"))
+			cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press p to pause container"))
+		} else if c.Status == domain.StatusPaused {
+			cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press p to unpause container"))
 		} else {
 			cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press s to start container"))
 		}
 		cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press r to restart container"))
+		cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press i to inspect configuration"))
+		if extractHostPort(c.Ports) != "" {
+			cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press o to open in browser"))
+		}
+		cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press d / delete to remove container"))
 
 		if len(m.logLines) > 0 {
 			cardLines = append(cardLines, "")
@@ -394,8 +684,6 @@ func (m *Model) renderDetailPanel(width, height int) string {
 	return m.renderTitledPanel(width, height, title, content, m.activePanel == LogsPanel, accent)
 }
 
-// renderViewportWithScrollbar renders viewport content with a vertical scrollbar
-// indicator on the right edge when content overflows.
 func renderViewportWithScrollbar(vp viewport.Model, active bool) string {
 	content := vp.View()
 	lines := strings.Split(content, "\n")
@@ -447,7 +735,6 @@ func truncateRunes(s string, maxLen int) string {
 	return string(r[:maxLen-1]) + "…"
 }
 
-// clampLines returns s with at most maxLines newline-separated lines.
 func clampLines(s string, maxLines int) string {
 	if maxLines <= 0 {
 		return ""
@@ -459,9 +746,6 @@ func clampLines(s string, maxLines int) string {
 	return strings.Join(lines[:maxLines], "\n")
 }
 
-// truncateLineWidths truncates each line in s so that its display width
-// never exceeds maxWidth columns. Uses lipgloss.Width for accurate
-// multi-cell character measurement (emoji, CJK, ANSI codes).
 func truncateLineWidths(s string, maxWidth int) string {
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
@@ -472,4 +756,81 @@ func truncateLineWidths(s string, maxWidth int) string {
 	return strings.Join(lines, "\n")
 }
 
+type portBinding struct {
+	hostPort      string
+	containerPort string
+	proto         string
+}
 
+func parsePortBindings(raw string) []portBinding {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	var bindings []portBinding
+	seen := make(map[string]bool)
+
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+
+		var hostPort, containerPortProto string
+		if strings.Contains(p, "->") {
+			sp := strings.SplitN(p, "->", 2)
+			hostPart := strings.TrimSpace(sp[0])
+			containerPortProto = strings.TrimSpace(sp[1])
+
+			if idx := strings.LastIndex(hostPart, ":"); idx != -1 {
+				hostPort = hostPart[idx+1:]
+			} else {
+				hostPort = hostPart
+			}
+		} else {
+			containerPortProto = p
+		}
+
+		var containerPort, proto string
+		if strings.Contains(containerPortProto, "/") {
+			cp := strings.SplitN(containerPortProto, "/", 2)
+			containerPort = cp[0]
+			proto = cp[1]
+		} else {
+			containerPort = containerPortProto
+			proto = "tcp"
+		}
+
+		key := hostPort + ":" + containerPort + "/" + proto
+		if !seen[key] {
+			seen[key] = true
+			bindings = append(bindings, portBinding{
+				hostPort:      hostPort,
+				containerPort: containerPort,
+				proto:         proto,
+			})
+		}
+	}
+	return bindings
+}
+
+func formatCleanPorts(raw string) (cleanPorts string, officialHostPort string) {
+	bindings := parsePortBindings(raw)
+	if len(bindings) == 0 {
+		return "none", ""
+	}
+
+	var items []string
+	for _, b := range bindings {
+		if b.hostPort != "" {
+			if officialHostPort == "" {
+				officialHostPort = b.hostPort
+			}
+			items = append(items, fmt.Sprintf("%s ➔ %s/%s", b.hostPort, b.containerPort, b.proto))
+		} else {
+			items = append(items, fmt.Sprintf("%s/%s", b.containerPort, b.proto))
+		}
+	}
+
+	return strings.Join(items, ", "), officialHostPort
+}

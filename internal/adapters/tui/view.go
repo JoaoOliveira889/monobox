@@ -5,12 +5,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/JoaoOliveira889/monobox/internal/domain"
 	"github.com/JoaoOliveira889/monobox/internal/pkg/ui"
 )
 
-// View renders the full TUI frame.
 func (m *Model) View() string {
 	if m.quitting {
 		return ""
@@ -20,6 +21,27 @@ func (m *Model) View() string {
 	}
 	if m.confirmClearLogs {
 		return m.renderCenteredModal(m.renderClearLogsConfirmation())
+	}
+	if m.confirmRemove {
+		return m.renderCenteredModal(m.renderRemoveConfirmation())
+	}
+	if m.confirmBatchAction != "" {
+		return m.renderCenteredModal(m.renderBatchConfirmation())
+	}
+	if m.showHelp {
+		return m.renderHelpOverlay()
+	}
+	if m.showThemeMenu {
+		return m.renderCenteredModal(m.renderThemeMenuModal())
+	}
+	if m.showEnvModal {
+		return m.renderCenteredModal(m.renderEnvModal())
+	}
+	if m.showHealthModal {
+		return m.renderCenteredModal(m.renderHealthModal())
+	}
+	if m.showInspect {
+		return m.renderCenteredModal(m.renderInspectModal())
 	}
 	if m.width < minTerminalWidth || m.height < minTerminalHeight {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
@@ -46,7 +68,6 @@ func (m *Model) View() string {
 		Render(view)
 }
 
-// renderSplash renders the startup splash screen (monogit style).
 func (m *Model) renderSplash() string {
 	barWidth := 20
 	filled := (m.splashFrame * 2) % (barWidth + 1)
@@ -98,10 +119,6 @@ func renderBrandWordmark(compact bool) string {
 	)
 }
 
-// renderHeader matches monogit's header style:
-// Line 1: Brand wordmark (MonoBox 2-color) • spinner/loading • stats
-// Line 2: Status bar line (● N containers • N running • [engine] • Press q to quit)
-// Line 3: Border line (─)
 func (m *Model) renderHeader() string {
 	var brand string
 	switch {
@@ -181,14 +198,19 @@ func (m *Model) renderHeaderStatusBar() string {
 	var parts []string
 	total := len(m.containers)
 	running, stopped := 0, 0
+	highLoadCount := 0
 	var totalCPU float64
 	var totalMemBytes float64
 
 	for _, c := range m.containers {
 		if c.IsRunning() {
 			running++
-			totalCPU += parseCPUVal(c.CPU)
+			cpuVal := parseCPUVal(c.CPU)
+			totalCPU += cpuVal
 			totalMemBytes += parseMemBytesVal(c.Mem)
+			if cpuVal >= 80.0 {
+				highLoadCount++
+			}
 		} else {
 			stopped++
 		}
@@ -201,6 +223,9 @@ func (m *Model) renderHeaderStatusBar() string {
 		parts = append(parts, ui.RunningStyle.Render(fmt.Sprintf("%d running", running)))
 		if stopped > 0 {
 			parts = append(parts, ui.StoppedStyle.Render(fmt.Sprintf("%d stopped", stopped)))
+		}
+		if highLoadCount > 0 {
+			parts = append(parts, ui.WarningStyle.Render(fmt.Sprintf("⚡ %d high load", highLoadCount)))
 		}
 		if running > 0 {
 			engName := strings.ToLower(m.engine)
@@ -244,15 +269,15 @@ func parseSizeToBytes(s string) float64 {
 	if s == "" || s == "N/A" {
 		return 0
 	}
-	var numStr string
-	var unitStr string
-	for i, r := range s {
-		if (r >= '0' && r <= '9') || r == '.' {
-			numStr += string(r)
-		} else {
-			unitStr = strings.TrimSpace(s[i:])
-			break
-		}
+	split := strings.IndexFunc(s, func(r rune) bool {
+		return !((r >= '0' && r <= '9') || r == '.')
+	})
+	var numStr, unitStr string
+	if split < 0 {
+		numStr = s
+	} else {
+		numStr = s[:split]
+		unitStr = strings.TrimSpace(s[split:])
 	}
 	val, err := strconv.ParseFloat(numStr, 64)
 	if err != nil {
@@ -297,32 +322,68 @@ func formatBytes(bytes float64) string {
 	}
 }
 
-// renderFooter — key hints left, version right.
 func (m *Model) renderFooter() string {
 	sep := ui.SubtleStyle.Render(" • ")
 	var parts []string
 
-	if m.activePanel == LogsPanel {
+	if m.filtering {
+		parts = []string{
+			m.fmtKey("?", "help"),
+			m.fmtKey("esc", "clear filter"),
+			m.fmtKey("enter", "done"),
+			m.fmtKey("↑↓", "nav"),
+		}
+	} else if m.logSearching {
+		parts = []string{
+			m.fmtKey("?", "help"),
+			m.fmtKey("esc", "clear search"),
+			m.fmtKey("enter", "done"),
+		}
+	} else if m.activePanel == LogsPanel {
 		followAction := "follow:ON"
 		if !m.logFollow {
 			followAction = "follow:OFF"
 		}
+		tsAction := "ts:OFF"
+		if m.showTimestamps {
+			tsAction = "ts:ON"
+		}
 		parts = []string{
 			m.fmtKey("↑↓/jk", "scroll"),
-			m.fmtKey("pg↑↓/end", "scroll/bottom"),
+			m.fmtKey("?", "help"),
+			m.fmtKey("/", "search"),
 			m.fmtKey("f", followAction),
+			m.fmtKey("t", tsAction),
+			m.fmtKey("s/ctrl+s", "export"),
 			m.fmtKey("<>", "resize"),
 			m.fmtKey("c", "clear"),
 			m.fmtKey("esc", "back"),
 			m.fmtKey("q", "quit"),
 		}
+	} else if node := m.selectedNode(); node != nil && node.Type == NodeProjectHeader {
+		parts = []string{
+			m.fmtKey("↑↓/jk", "nav"),
+			m.fmtKey("?", "help"),
+			m.fmtKey("space/enter", "toggle group"),
+			m.fmtKey("s", "batch start/stop"),
+			m.fmtKey("r", "batch restart"),
+			m.fmtKey("d", "batch remove"),
+			m.fmtKey("/", "filter"),
+			m.fmtKey("q", "quit"),
+		}
 	} else {
 		parts = []string{
 			m.fmtKey("↑↓/jk", "nav"),
+			m.fmtKey("?", "help"),
+			m.fmtKey("/", "filter"),
+			m.fmtKey("e", "exec"),
+			m.fmtKey("i", "inspect"),
 			m.fmtKey("s", "start/stop"),
-			m.fmtKey("<>", "resize"),
-			m.fmtKey("enter", "logs"),
+			m.fmtKey("p", "pause"),
+			m.fmtKey("d", "remove"),
+			m.fmtKey("o", "open"),
 			m.fmtKey("r", "restart"),
+			m.fmtKey("T", "theme"),
 			m.fmtKey("q", "quit"),
 		}
 	}
@@ -365,7 +426,6 @@ func (m *Model) fmtKey(k, action string) string {
 	return ui.FooterKeyStyle.Render(k) + " " + ui.FooterActionStyle.Render(action)
 }
 
-// renderBody renders the two-panel layout.
 func (m *Model) renderBody() string {
 	bodyHeight := m.panelHeight()
 
@@ -378,13 +438,6 @@ func (m *Model) renderBody() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
 
-// refreshViewports syncs viewport content after state changes.
-func (m *Model) refreshViewports() {
-	m.refreshListViewport()
-	m.refreshLogViewportContent()
-}
-
-// renderCenteredModal centers content on screen.
 func (m *Model) renderCenteredModal(content string) string {
 	return lipgloss.Place(
 		m.width, m.height,
@@ -401,4 +454,380 @@ func (m *Model) renderClearLogsConfirmation() string {
 		"  ",
 		m.fmtKey("n", "no"),
 	)
+}
+
+func (m *Model) renderRemoveConfirmation() string {
+	c := m.selectedContainer()
+	name := "container"
+	if c != nil {
+		name = c.Name
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Center,
+		ui.ErrorStyle.Render("Remove container "+name+"?"),
+		"  ",
+		m.fmtKey("y", "yes"),
+		"  ",
+		m.fmtKey("n", "cancel"),
+	)
+}
+
+func (m *Model) renderBatchConfirmation() string {
+	action := strings.TrimPrefix(m.confirmBatchAction, "batch_")
+	projName := m.batchProjectName
+	msg := fmt.Sprintf("%s all containers in '%s'?", strings.Title(action), projName)
+	var actionStyle lipgloss.Style
+	if action == "stop" || action == "remove" {
+		actionStyle = ui.ErrorStyle
+	} else {
+		actionStyle = ui.ValueStyle
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Center,
+		actionStyle.Render(msg),
+		"  ",
+		m.fmtKey("y", "yes"),
+		"  ",
+		m.fmtKey("n", "cancel"),
+	)
+}
+
+func (m *Model) renderInspectModal() string {
+	c := m.selectedContainer()
+	name := "Container"
+	if c != nil {
+		name = c.Name
+	}
+	header := ui.LabelStyle.Render("Inspect — "+name) + " " + ui.SubtleStyle.Render("(esc/q/i to close)")
+	body := renderViewportWithScrollbar(m.inspectViewport, true)
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", body)
+}
+
+func (m *Model) clampModalSize(marginW, maxW, marginH, maxH int) (int, int) {
+	w := m.width - marginW
+	if w > maxW {
+		w = maxW
+	}
+	if w < 40 {
+		w = 40
+	}
+	h := m.height - marginH
+	if h > maxH {
+		h = maxH
+	}
+	if h < 10 {
+		h = 10
+	}
+	return w, h
+}
+
+func (m *Model) renderHelpOverlay() string {
+	panelWidth, panelHeight := m.clampModalSize(4, 90, 2, 26)
+
+	innerWidth := panelWidth - 6
+	if innerWidth < 64 {
+		innerWidth = 64
+	}
+	innerHeight := panelHeight - 6
+	if innerHeight < 12 {
+		innerHeight = 12
+	}
+
+	title := lipgloss.JoinHorizontal(lipgloss.Bottom,
+		renderBrandWordmark(true),
+		" ",
+		ui.BrandTitleStyle.Render("SHORTCUTS"),
+	)
+
+	vpHeight := innerHeight - 3
+	if vpHeight < 5 {
+		vpHeight = 5
+	}
+	if m.helpViewport.Width != innerWidth-1 || m.helpViewport.Height != vpHeight {
+		m.helpViewport = viewport.New(innerWidth-1, vpHeight)
+	} else {
+		m.helpViewport.Width = innerWidth - 1
+		m.helpViewport.Height = vpHeight
+	}
+
+	body := m.renderHelpMenu(innerWidth-1, 999)
+	m.helpViewport.SetContent(body)
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.NewStyle().Align(lipgloss.Center).Width(innerWidth).Render(title),
+		"",
+		renderViewportWithScrollbar(m.helpViewport, true),
+		"",
+		lipgloss.NewStyle().Align(lipgloss.Center).Width(innerWidth).Render(ui.SubtleStyle.Render("Press ESC, q or ? to close")),
+	)
+
+	panelStyle := ui.ActivePanelStyle.
+		BorderStyle(lipgloss.DoubleBorder()).
+		BorderForeground(lipgloss.Color(ui.ColorHighlight)).
+		Width(panelWidth).
+		Height(panelHeight).
+		Padding(1, 2)
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panelStyle.Render(content))
+}
+
+func (m *Model) renderHelpMenu(width, height int) string {
+	type helpEntry struct {
+		key    string
+		action string
+	}
+	type helpSection struct {
+		title   string
+		entries []helpEntry
+	}
+
+	sections := []helpSection{
+		{
+			title: "NAVIGATION & PANELS",
+			entries: []helpEntry{
+				{key: "1 | 2 | tab", action: "Switch panels"},
+				{key: "↑↓ / jk", action: "Navigate / scroll"},
+				{key: "< > / , .", action: "Resize panel width"},
+				{key: "/", action: "Filter containers"},
+				{key: "?", action: "Toggle help modal"},
+				{key: "T", action: "Theme menu"},
+				{key: "esc", action: "Back / clear filter"},
+				{key: "q | ctrl+c", action: "Quit Monobox"},
+			},
+		},
+		{
+			title: "CONTAINER ACTIONS",
+			entries: []helpEntry{
+				{key: "s", action: "Start / Stop"},
+				{key: "r", action: "Restart container"},
+				{key: "p", action: "Pause / Unpause"},
+				{key: "d | delete", action: "Remove container"},
+				{key: "e | x", action: "Exec shell (/bin/sh)"},
+				{key: "i", action: "Inspect JSON"},
+				{key: "o", action: "Open host port"},
+			},
+		},
+		{
+			title: "COMPOSE STACKS",
+			entries: []helpEntry{
+				{key: "space | enter", action: "Expand / collapse"},
+				{key: "s (group)", action: "Batch Start / Stop"},
+				{key: "r (group)", action: "Batch Restart"},
+				{key: "d (group)", action: "Batch Remove"},
+			},
+		},
+		{
+			title: "LOGS VIEW",
+			entries: []helpEntry{
+				{key: "↑↓ / jk", action: "Scroll log history"},
+				{key: "pgup | pgdn", action: "Page up / down"},
+				{key: "end | G", action: "Jump to bottom"},
+				{key: "f", action: "Toggle live follow"},
+				{key: "t", action: "Toggle timestamps"},
+				{key: "c | ctrl+l", action: "Clear container logs"},
+				{key: "/", action: "Search / filter logs"},
+				{key: "s | ctrl+s", action: "Export logs to file"},
+				{key: "esc", action: "Back to list"},
+			},
+		},
+		{
+			title: "THEME MENU",
+			entries: []helpEntry{
+				{key: "↑↓ / jk", action: "Live preview theme"},
+				{key: "enter", action: "Save preference"},
+				{key: "esc | q | T", action: "Cancel / restore"},
+			},
+		},
+		{
+			title: "CONFIRMATION MODALS",
+			entries: []helpEntry{
+				{key: "y | Y", action: "Confirm action"},
+				{key: "n | N | esc", action: "Cancel action"},
+			},
+		},
+	}
+
+	colWidth := (width - 4) / 2
+	if colWidth < 30 {
+		colWidth = 30
+	}
+
+	var col1Blocks []string
+	var col2Blocks []string
+
+	for i, sec := range sections {
+		var lines []string
+		lines = append(lines, ui.LabelStyle.Bold(true).Render(sec.title))
+		for _, e := range sec.entries {
+			kStyled := ui.FooterKeyStyle.Width(14).Render(e.key)
+			dStyled := ui.SubtleStyle.Render(e.action)
+			lines = append(lines, " "+kStyled+" "+dStyled)
+		}
+		block := strings.Join(lines, "\n")
+		if i%2 == 0 {
+			col1Blocks = append(col1Blocks, block)
+		} else {
+			col2Blocks = append(col2Blocks, block)
+		}
+	}
+
+	col1 := strings.Join(col1Blocks, "\n\n")
+	col2 := strings.Join(col2Blocks, "\n\n")
+
+	return lipgloss.JoinHorizontal(lipgloss.Top,
+		lipgloss.NewStyle().Width(colWidth).Render(col1),
+		"  ",
+		lipgloss.NewStyle().Width(colWidth).Render(col2),
+	)
+}
+
+func (m *Model) renderThemeMenuModal() string {
+	title := ui.ModalTitleStyle.Render(" Select Theme ") + " " + ui.SubtleStyle.Render("(↑/↓ navigate • enter save • esc cancel)")
+
+	var rows []string
+	for i, t := range ui.Themes {
+		isSelected := i == m.themeCursor
+		isCurrentSaved := strings.EqualFold(t.Name, m.cfg.Theme)
+
+		var prefix string
+		if isSelected {
+			prefix = ui.PointerStyle.Render("➔ ")
+		} else {
+			prefix = "  "
+		}
+
+		var itemText string
+		if isSelected {
+			itemText = ui.SelectedItemStyle.Render(" " + t.Name + " ")
+		} else {
+			itemText = ui.NormalItemStyle.Render(" " + t.Name + " ")
+		}
+
+		var badge string
+		if isCurrentSaved {
+			badge = " " + ui.SuccessStyle.Render("[active]")
+		}
+
+		sampleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(t.Highlight)).Bold(true)
+		preview := sampleStyle.Render(" ■ ")
+
+		rows = append(rows, prefix+itemText+preview+badge)
+	}
+
+	body := strings.Join(rows, "\n")
+	return lipgloss.JoinVertical(lipgloss.Left, title, "", body)
+}
+
+func (m *Model) fmtHelpRow(key, desc string) string {
+	kStyled := ui.FooterKeyStyle.Width(18).Render(key)
+	dStyled := ui.SubtleStyle.Render(desc)
+	return " " + kStyled + " " + dStyled
+}
+
+func (m *Model) renderEnvModal() string {
+	c := m.selectedContainer()
+	name := "Container"
+	if c != nil {
+		name = c.Name
+	}
+	header := ui.LabelStyle.Render("Environment Variables — "+name) + " " + ui.SubtleStyle.Render("(esc/q/E to close)")
+
+	var envList []string
+	if c != nil {
+		if details := m.inspectDetailsCache[c.ID]; details != nil && len(details.Env) > 0 {
+			envList = details.Env
+		}
+	}
+
+	w := m.width - 12
+	if w < 30 {
+		w = 30
+	}
+	h := m.height - 10
+	if h < 6 {
+		h = 6
+	}
+
+	if len(envList) == 0 {
+		body := ui.SubtleStyle.Render("No environment variables found or loading inspect details...")
+		return lipgloss.JoinVertical(lipgloss.Left, header, "", body)
+	}
+
+	var rows []string
+	for _, env := range envList {
+		parts := strings.SplitN(env, "=", 2)
+		if len(parts) == 2 {
+			k := ui.FooterKeyStyle.Render(parts[0])
+			v := ui.ValueStyle.Render(parts[1])
+			rows = append(rows, fmt.Sprintf("  %-30s = %s", k, v))
+		} else {
+			rows = append(rows, "  "+ui.ValueStyle.Render(env))
+		}
+	}
+
+	m.envViewport = viewport.New(w, h)
+	m.envViewport.SetContent(strings.Join(rows, "\n"))
+	body := renderViewportWithScrollbar(m.envViewport, true)
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", body)
+}
+
+func (m *Model) renderHealthModal() string {
+	c := m.selectedContainer()
+	name := "Container"
+	if c != nil {
+		name = c.Name
+	}
+	header := ui.LabelStyle.Render("Healthcheck Logs — "+name) + " " + ui.SubtleStyle.Render("(esc/q/H to close)")
+
+	var health *domain.HealthDetail
+	if c != nil {
+		if details := m.inspectDetailsCache[c.ID]; details != nil {
+			health = details.Health
+		}
+	}
+
+	w := m.width - 12
+	if w < 30 {
+		w = 30
+	}
+	h := m.height - 10
+	if h < 6 {
+		h = 6
+	}
+
+	if health == nil || len(health.Log) == 0 {
+		body := ui.SubtleStyle.Render("No healthcheck history found for this container.")
+		return lipgloss.JoinVertical(lipgloss.Left, header, "", body)
+	}
+
+	var rows []string
+	statusStr := string(health.Status)
+	if health.Status == domain.HealthHealthy {
+		statusStr = ui.StatusSuccessStyle.Render("● HEALTHY")
+	} else if health.Status == domain.HealthUnhealthy {
+		statusStr = ui.StatusErrorStyle.Render("✖ UNHEALTHY")
+	}
+	rows = append(rows, fmt.Sprintf("  Status: %s  •  Failing Streak: %d", statusStr, health.FailingStreak))
+	rows = append(rows, "")
+	rows = append(rows, ui.LabelStyle.Render("  PROBE LOGS (Recent):"))
+
+	for i, log := range health.Log {
+		exitStr := ui.SuccessStyle.Render("Exit: 0 (Success)")
+		if log.ExitCode != 0 {
+			exitStr = ui.ErrorStyle.Render(fmt.Sprintf("Exit: %d (Failure)", log.ExitCode))
+		}
+		rows = append(rows, fmt.Sprintf("  [%d] %s  •  %s", i+1, log.Start, exitStr))
+		if strings.TrimSpace(log.Output) != "" {
+			outLines := strings.Split(strings.TrimSpace(log.Output), "\n")
+			for _, l := range outLines {
+				rows = append(rows, ui.SubtleStyle.Render("      | "+l))
+			}
+		}
+		rows = append(rows, "")
+	}
+
+	m.healthViewport = viewport.New(w, h)
+	m.healthViewport.SetContent(strings.Join(rows, "\n"))
+	body := renderViewportWithScrollbar(m.healthViewport, true)
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", body)
 }
