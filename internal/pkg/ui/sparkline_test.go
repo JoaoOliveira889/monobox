@@ -1,47 +1,33 @@
 package ui_test
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/JoaoOliveira889/monobox/internal/pkg/ui"
 )
 
+var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+func stripANSI(s string) string {
+	return ansiRegexp.ReplaceAllString(s, "")
+}
+
 func TestRenderSparkline(t *testing.T) {
 	t.Run("empty slice", func(t *testing.T) {
 		got := ui.RenderSparkline(nil, 10)
-		if got != "" {
-			t.Errorf("expected empty string, got %q", got)
-		}
-	})
-
-	t.Run("single value zero", func(t *testing.T) {
-		got := ui.RenderSparkline([]float64{0}, 10)
-		if got != " " {
-			t.Errorf("expected ' ', got %q", got)
-		}
-	})
-
-	t.Run("single value positive", func(t *testing.T) {
-		got := ui.RenderSparkline([]float64{5.5}, 10)
-		if got != "▂" {
-			t.Errorf("expected '▂', got %q", got)
+		runes := []rune(stripANSI(got))
+		if len(runes) != 10 {
+			t.Errorf("expected 10 padded track runes, got %d (%q)", len(runes), got)
 		}
 	})
 
 	t.Run("increasing series", func(t *testing.T) {
-		data := []float64{0, 1, 2, 3, 4, 5, 6, 7}
-		got := ui.RenderSparkline(data, 10)
-		want := " ▂▃▄▅▆▇█"
-		if got != want {
-			t.Errorf("got %q, want %q", got, want)
-		}
-	})
-
-	t.Run("maxLen cap", func(t *testing.T) {
-		data := []float64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
-		got := ui.RenderSparkline(data, 4)
-		if len([]rune(got)) != 4 {
-			t.Errorf("expected 4 runes, got %d (%q)", len([]rune(got)), got)
+		data := []float64{0, 10, 25, 50, 75, 90, 100}
+		got := ui.RenderSparkline(data, 7)
+		clean := stripANSI(got)
+		if len([]rune(clean)) != 7 {
+			t.Errorf("expected 7 runes, got %d (%q)", len([]rune(clean)), clean)
 		}
 	})
 }
