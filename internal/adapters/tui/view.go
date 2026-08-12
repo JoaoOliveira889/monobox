@@ -19,6 +19,9 @@ func (m *Model) View() string {
 	if m.showSplash {
 		return m.renderSplash()
 	}
+	if m.confirmPortConflict {
+		return m.renderCenteredModal(m.renderPortConflictModal())
+	}
 	if m.confirmClearLogs {
 		return m.renderCenteredModal(m.renderClearLogsConfirmation())
 	}
@@ -33,6 +36,9 @@ func (m *Model) View() string {
 	}
 	if m.showThemeMenu {
 		return m.renderCenteredModal(m.renderThemeMenuModal())
+	}
+	if m.showGraphModal {
+		return m.renderCenteredModal(m.renderGraphModal())
 	}
 	if m.showEnvModal {
 		return m.renderCenteredModal(m.renderEnvModal())
@@ -599,6 +605,9 @@ func (m *Model) renderHelpMenu(width, height int) string {
 				{key: "s", action: "Start / Stop"},
 				{key: "r", action: "Restart container"},
 				{key: "p", action: "Pause / Unpause"},
+				{key: "g", action: "Historical Metrics Graph"},
+				{key: "E", action: "Environment Variables"},
+				{key: "H", action: "Healthcheck Probe Logs"},
 				{key: "d | delete", action: "Remove container"},
 				{key: "e | x", action: "Exec shell (/bin/sh)"},
 				{key: "i", action: "Inspect JSON"},
@@ -624,6 +633,7 @@ func (m *Model) renderHelpMenu(width, height int) string {
 				{key: "t", action: "Toggle timestamps"},
 				{key: "c | ctrl+l", action: "Clear container logs"},
 				{key: "/", action: "Search / filter logs"},
+				{key: "ctrl+r", action: "Toggle Regex search"},
 				{key: "s | ctrl+s", action: "Export logs to file"},
 				{key: "esc", action: "Back to list"},
 			},
@@ -830,4 +840,120 @@ func (m *Model) renderHealthModal() string {
 	body := renderViewportWithScrollbar(m.healthViewport, true)
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, "", body)
+}
+
+func (m *Model) renderPortConflictModal() string {
+	title := ui.WarningStyle.Render(" ⚠️ PORT CONFLICT DETECTED ")
+	msg := fmt.Sprintf("Host port %s is already in use by running container '%s'.\nStarting this container may fail due to port binding conflict.",
+		ui.ValueStyle.Render(m.conflictingPort),
+		ui.LabelStyle.Render(m.conflictingContainer),
+	)
+	prompt := ui.SubtleStyle.Render("Do you want to start it anyway? [y/N]")
+	return lipgloss.JoinVertical(lipgloss.Left, title, "", msg, "", prompt)
+}
+
+func (m *Model) renderGraphModal() string {
+	c := m.selectedContainer()
+	name := "Container"
+	if c != nil {
+		name = c.Name
+	}
+	header := ui.LabelStyle.Render("Historical Metrics Graph — "+name) + " " + ui.SubtleStyle.Render("(esc/q/g to close)")
+
+	if c == nil {
+		return lipgloss.JoinVertical(lipgloss.Left, header, "", ui.SubtleStyle.Render("No container selected."))
+	}
+
+	key := c.ID
+	if key == "" {
+		key = c.Name
+	}
+	cpuHist, memHist := m.GetStatsHistory(key)
+
+	w := m.width - 12
+	if w < 40 {
+		w = 40
+	}
+	h := m.height - 10
+	if h < 10 {
+		h = 10
+	}
+
+	var rows []string
+	rows = append(rows, fmt.Sprintf("  Container: %s  •  Status: %s", ui.ValueStyle.Render(c.Name), string(c.Status)))
+	rows = append(rows, fmt.Sprintf("  Current CPU: %s  •  Current Mem: %s", ui.ValueStyle.Render(c.CPU), ui.ValueStyle.Render(c.Mem)))
+	rows = append(rows, "")
+
+	chartWidth := w - 16
+	if chartWidth < 20 {
+		chartWidth = 20
+	}
+
+	rows = append(rows, ui.LabelStyle.Render("  📈 CPU UTILIZATION HISTORY (%):"))
+	cpuGraph := renderDetailedHistoryGraph(cpuHist, chartWidth, 5, ui.ColorHighlight)
+	for _, l := range strings.Split(cpuGraph, "\n") {
+		rows = append(rows, "    "+l)
+	}
+	rows = append(rows, "")
+
+	rows = append(rows, ui.LabelStyle.Render("  📊 MEMORY UTILIZATION HISTORY (%):"))
+	memGraph := renderDetailedHistoryGraph(memHist, chartWidth, 5, ui.ColorCyan)
+	for _, l := range strings.Split(memGraph, "\n") {
+		rows = append(rows, "    "+l)
+	}
+
+	m.graphViewport = viewport.New(w, h)
+	m.graphViewport.SetContent(strings.Join(rows, "\n"))
+	body := renderViewportWithScrollbar(m.graphViewport, true)
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", body)
+}
+
+func renderDetailedHistoryGraph(history []float64, width, height int, barColor lipgloss.Color) string {
+	if len(history) == 0 {
+		return ui.SubtleStyle.Render("No stats history recorded yet.")
+	}
+
+	data := history
+	if len(data) > width {
+		data = data[len(data)-width:]
+	}
+
+	var maxVal float64 = 1.0
+	for _, v := range data {
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+
+	blocks := []string{" ", " ", "▂", "▃", "▄", "▅", "▆", "▇", "█"}
+	style := lipgloss.NewStyle().Foreground(barColor)
+
+	var lines []string
+	for r := height - 1; r >= 0; r-- {
+		var line strings.Builder
+		levelThreshold := maxVal * float64(r) / float64(height)
+		nextThreshold := maxVal * float64(r+1) / float64(height)
+
+		for _, val := range data {
+			if val >= nextThreshold {
+				line.WriteString("█")
+			} else if val > levelThreshold {
+				fraction := (val - levelThreshold) / (nextThreshold - levelThreshold)
+				idx := int(fraction * float64(len(blocks)-1))
+				if idx < 0 {
+					idx = 0
+				}
+				if idx >= len(blocks) {
+					idx = len(blocks) - 1
+				}
+				line.WriteString(blocks[idx])
+			} else {
+				line.WriteString(" ")
+			}
+		}
+		lines = append(lines, fmt.Sprintf("%5.1f%% │ %s", levelThreshold, style.Render(line.String())))
+	}
+	lines = append(lines, fmt.Sprintf("       └%s", strings.Repeat("─", len(data))))
+	return strings.Join(lines, "\n")
 }

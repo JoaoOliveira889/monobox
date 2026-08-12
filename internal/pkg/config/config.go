@@ -12,6 +12,7 @@ type Config struct {
 	Theme           string `json:"theme" yaml:"theme"`
 	MetricsInterval int    `json:"metrics_interval" yaml:"metrics_interval"` // in seconds
 	LogLineLimit    int    `json:"log_line_limit" yaml:"log_line_limit"`
+	LogTailLimit    int    `json:"log_tail_limit" yaml:"log_tail_limit"`
 	ShowTimestamps  bool   `json:"show_timestamps" yaml:"show_timestamps"`
 }
 
@@ -20,6 +21,7 @@ func DefaultConfig() Config {
 		Theme:           "Tokyo Night",
 		MetricsInterval: 5,
 		LogLineLimit:    100,
+		LogTailLimit:    100,
 		ShowTimestamps:  false,
 	}
 }
@@ -75,6 +77,10 @@ func Load() (Config, error) {
 			if n, err := strconv.Atoi(val); err == nil && n > 0 {
 				cfg.LogLineLimit = n
 			}
+		case "log_tail_limit":
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				cfg.LogTailLimit = n
+			}
 		case "show_timestamps":
 			if b, err := strconv.ParseBool(val); err == nil {
 				cfg.ShowTimestamps = b
@@ -100,10 +106,12 @@ func Save(cfg Config) error {
 		"theme: %s\n"+
 		"metrics_interval: %d\n"+
 		"log_line_limit: %d\n"+
+		"log_tail_limit: %d\n"+
 		"show_timestamps: %t\n",
 		cfg.Theme,
 		cfg.MetricsInterval,
 		cfg.LogLineLimit,
+		cfg.LogTailLimit,
 		cfg.ShowTimestamps,
 	)
 

@@ -56,3 +56,10 @@ func TestParseMemPercVal(t *testing.T) {
 		t.Errorf("expected 9.74, got %f", val)
 	}
 }
+
+func TestParseHostPorts(t *testing.T) {
+	ports := parseHostPorts("0.0.0.0:8080->80/tcp, [::]:8080->80/tcp, 0.0.0.0:8443->443/tcp")
+	if len(ports) != 2 || ports[0] != "8080" || ports[1] != "8443" {
+		t.Errorf("expected [8080 8443], got %v", ports)
+	}
+}

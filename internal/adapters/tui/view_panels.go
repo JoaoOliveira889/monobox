@@ -370,6 +370,31 @@ func statusBadgeText(c containerItem, maxWidth int) string {
 	}
 }
 
+func parseHostPorts(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	var result []string
+	seen := make(map[string]bool)
+
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if idx := strings.Index(p, "->"); idx != -1 {
+			hostPart := p[:idx]
+			if colon := strings.LastIndex(hostPart, ":"); colon != -1 {
+				port := hostPart[colon+1:]
+				if port != "" && !seen[port] {
+					seen[port] = true
+					result = append(result, port)
+				}
+			}
+		}
+	}
+	return result
+}
+
 func parseMemPercVal(memStr string) float64 {
 	if idx := strings.Index(memStr, "("); idx != -1 {
 		end := strings.Index(memStr[idx:], "%)")

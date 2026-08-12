@@ -32,6 +32,8 @@ type keyMap struct {
 	ThemeMenu        []string
 	EnvModal         []string
 	HealthModal      []string
+	Graph            []string
+	ToggleRegex      []string
 }
 
 var keys = keyMap{
@@ -64,6 +66,8 @@ var keys = keyMap{
 	ThemeMenu:        []string{"T"},
 	EnvModal:         []string{"E"},
 	HealthModal:      []string{"H"},
+	Graph:            []string{"g"},
+	ToggleRegex:      []string{"ctrl+r"},
 }
 
 func matchesKey(msg tea.KeyMsg, ks ...string) bool {

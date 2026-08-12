@@ -23,6 +23,10 @@ func (m *Model) handleKeys(msg tea.KeyMsg) tea.Cmd {
 		return m.handleThemeMenuKeys(msg)
 	}
 
+	if m.showGraphModal {
+		return m.handleGraphModalKeys(msg)
+	}
+
 	if m.showEnvModal {
 		return m.handleEnvModalKeys(msg)
 	}
@@ -33,6 +37,10 @@ func (m *Model) handleKeys(msg tea.KeyMsg) tea.Cmd {
 
 	if m.showInspect {
 		return m.handleInspectKeys(msg)
+	}
+
+	if m.confirmPortConflict {
+		return m.handlePortConflictConfirmation(msg)
 	}
 
 	if m.confirmClearLogs {
@@ -387,6 +395,14 @@ func (m *Model) handleListKeys(msg tea.KeyMsg) tea.Cmd {
 		m.logFollow = true
 		return m.selectAndStreamContainerLogs()
 
+	case matchesKey(msg, keys.Graph...):
+		c := m.selectedContainer()
+		if c == nil {
+			return nil
+		}
+		m.showGraphModal = true
+		return nil
+
 	case matchesKey(msg, keys.Toggle...):
 		if node != nil && node.Type == NodeProjectHeader {
 			action := "batch_start"
@@ -405,6 +421,13 @@ func (m *Model) handleListKeys(msg tea.KeyMsg) tea.Cmd {
 			m.markContainerLoading(m.cursor)
 			m.setStatus("⟳ stop…")
 			return m.containerActionCmd(c.ID, "stop")
+		}
+		if hasConflict, otherName, port := m.detectPortConflict(c); hasConflict {
+			m.confirmPortConflict = true
+			m.conflictingContainer = otherName
+			m.conflictingPort = port
+			m.pendingStartTarget = c.ID
+			return nil
 		}
 		return m.startContainerOptimistic(c.ID, c.Name)
 
@@ -713,6 +736,43 @@ func (m *Model) handleHealthModalKeys(msg tea.KeyMsg) tea.Cmd {
 		m.healthViewport.PageUp()
 	case "pgdown", "ctrl+d":
 		m.healthViewport.PageDown()
+	}
+	return nil
+}
+
+func (m *Model) handleGraphModalKeys(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc", "q", "g", "G":
+		m.showGraphModal = false
+		return nil
+	case "up", "k":
+		m.graphViewport.LineUp(1)
+	case "down", "j":
+		m.graphViewport.LineDown(1)
+	case "pgup", "ctrl+u":
+		m.graphViewport.PageUp()
+	case "pgdown", "ctrl+d":
+		m.graphViewport.PageDown()
+	}
+	return nil
+}
+
+func (m *Model) handlePortConflictConfirmation(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "y", "Y", "enter":
+		m.confirmPortConflict = false
+		targetID := m.pendingStartTarget
+		m.pendingStartTarget = ""
+		c := m.containerByID(targetID)
+		if c != nil {
+			return m.startContainerOptimistic(c.ID, c.Name)
+		}
+		return nil
+	case "n", "N", "esc":
+		m.confirmPortConflict = false
+		m.pendingStartTarget = ""
+		m.setStatus("Port conflict start cancelled")
+		return nil
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -18,7 +19,7 @@ import (
 	"github.com/JoaoOliveira889/monobox/internal/pkg/ui"
 )
 
-var Version = "0.0.3"
+var Version = "0.0.4"
 
 const (
 	minTerminalWidth  = 40
@@ -130,13 +131,22 @@ type Model struct {
 	helpViewport    viewport.Model
 	envViewport     viewport.Model
 	healthViewport  viewport.Model
+	graphViewport   viewport.Model
 
 	showEnvModal    bool
 	showHealthModal bool
+	showGraphModal  bool
 	showHelp        bool
 	showThemeMenu   bool
 	themeCursor     int
 	initialTheme    string
+
+	logRegexSearch bool
+
+	confirmPortConflict  bool
+	conflictingContainer string
+	conflictingPort      string
+	pendingStartTarget   string
 
 	inspectDetailsCache map[string]*domain.ContainerInspectDetails
 
@@ -199,6 +209,7 @@ func NewModel(provider domain.ContainerProvider, engineName string) Model {
 		helpViewport:        viewport.New(0, 0),
 		envViewport:         viewport.New(0, 0),
 		healthViewport:      viewport.New(0, 0),
+		graphViewport:       viewport.New(0, 0),
 		loading:             true,
 		logFollow:           true,
 		showSplash:          true,
@@ -442,14 +453,34 @@ func (m *Model) refreshLogViewportContent() {
 		return
 	}
 	query := strings.TrimSpace(m.logSearchQuery)
-	queryLower := strings.ToLower(query)
 	var formatted []string
-	for _, line := range m.logLines {
-		if queryLower != "" && !strings.Contains(strings.ToLower(line), queryLower) {
-			continue
+
+	if query != "" && m.logRegexSearch {
+		re, err := regexp.Compile("(?i)" + query)
+		if err != nil {
+			m.logViewport.SetContent(ui.ErrorStyle.Render(" Invalid regex pattern: " + err.Error()))
+			return
 		}
-		formatted = append(formatted, highlightLogLine(line, query))
+		for _, line := range m.logLines {
+			if !re.MatchString(line) {
+				continue
+			}
+			matchStyle := lipgloss.NewStyle().Background(lipgloss.Color("#e0af68")).Foreground(lipgloss.Color("#1a1b26")).Bold(true)
+			highlighted := re.ReplaceAllStringFunc(line, func(match string) string {
+				return matchStyle.Render(match)
+			})
+			formatted = append(formatted, highlightKeywords(highlighted))
+		}
+	} else {
+		queryLower := strings.ToLower(query)
+		for _, line := range m.logLines {
+			if queryLower != "" && !strings.Contains(strings.ToLower(line), queryLower) {
+				continue
+			}
+			formatted = append(formatted, highlightLogLine(line, query))
+		}
 	}
+
 	if len(formatted) == 0 && query != "" {
 		m.logViewport.SetContent(ui.SubtleStyle.Render(" No logs matching filter: " + m.logSearchQuery))
 		return
@@ -519,6 +550,40 @@ func (m Model) ActivePanel() Panel { return m.activePanel }
 func (m Model) Cursor() int        { return m.cursor }
 func (m Model) LogFollow() bool    { return m.logFollow }
 func (m *Model) SetCursor(i int)   { m.cursor = i }
+
+func (m *Model) containerByID(id string) *containerItem {
+	for i := range m.containers {
+		if m.containers[i].ID == id {
+			return &m.containers[i]
+		}
+	}
+	return nil
+}
+
+func (m *Model) detectPortConflict(c *containerItem) (bool, string, string) {
+	if c == nil || c.Ports == "" {
+		return false, "", ""
+	}
+	targetHostPorts := parseHostPorts(c.Ports)
+	if len(targetHostPorts) == 0 {
+		return false, "", ""
+	}
+
+	for _, other := range m.containers {
+		if !other.IsRunning() || other.ID == c.ID {
+			continue
+		}
+		otherHostPorts := parseHostPorts(other.Ports)
+		for _, p1 := range targetHostPorts {
+			for _, p2 := range otherHostPorts {
+				if p1 == p2 {
+					return true, other.Name, p1
+				}
+			}
+		}
+	}
+	return false, "", ""
+}
 
 func statusRank(item containerItem) int {
 	if item.starting {

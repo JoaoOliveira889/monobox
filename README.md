@@ -4,11 +4,11 @@
   <a href="https://github.com/JoaoOliveira889/monobox/releases/latest"><img src="https://img.shields.io/github/v/release/JoaoOliveira889/monobox?color=7aa2f7&label=tag&logo=github&style=flat-square" alt="Latest Tag"></a>
   <a href="https://github.com/JoaoOliveira889/monobox/releases/latest"><img src="https://img.shields.io/github/downloads/JoaoOliveira889/monobox/total?color=9ece6a&label=downloads&logo=github&style=flat-square" alt="Total Downloads"></a>
   <a href="https://goreportcard.com/report/github.com/JoaoOliveira889/monobox"><img src="https://goreportcard.com/badge/github.com/JoaoOliveira889/monobox?style=flat-square" alt="Go Report Card"></a>
-  <a href="https://github.com/JoaoOliveira889/homebrew-tap"><img src="https://img.shields.io/badge/homebrew-v0.0.3-b8ff3d?logo=homebrew&style=flat-square" alt="Homebrew Version"></a>
+  <a href="https://github.com/JoaoOliveira889/homebrew-tap"><img src="https://img.shields.io/badge/homebrew-v0.0.4-b8ff3d?logo=homebrew&style=flat-square" alt="Homebrew Version"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/JoaoOliveira889/monobox"><strong>MonoBox v0.0.3 · JoaoOliveira889/monobox</strong></a>
+  <a href="https://github.com/JoaoOliveira889/monobox"><strong>MonoBox v0.0.4 · JoaoOliveira889/monobox</strong></a>
 </p>
 
 **Terminal UI for Docker and Podman containers.** A TUI tool that lists all your containers with live status, log streaming, and one-key lifecycle actions — with confirmation guards for every mutating command.
@@ -21,10 +21,12 @@ Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Lip Gloss]
 
 - **Auto-detect engine** — Docker first, then Podman; clear error if neither is available
 - **Container list** — icon per service type, name, status badge, and uptime
-- **Live log streaming** — real-time `docker logs -f` / `podman logs -f` with follow mode and log export (`s` / `Ctrl+S`)
+- **Live log streaming** — real-time `docker logs -f` / `podman logs -f` with follow mode, log export (`s`), and Regex pattern search (`Ctrl+R`)
 - **Lifecycle actions** — start/stop toggle, pause/unpause, and restart with optimistic UI updates
+- **Historical Metrics Graph (`g`)** — full-screen CPU & Memory timeline chart with min/max/current stats
+- **Port Conflict Detection (`⚠️`)** — automatic detection and confirmation guard before starting containers with occupied host ports
 - **Interactive Theme Menu (`T`)** — switch themes in real time (Tokyo Night, Dracula, Nord, Gruvbox, Monokai, One Dark)
-- **User Config (`~/.config/monobox/config.yaml`)** — persist default theme, metrics refresh interval, log line limits & timestamps
+- **User Config (`~/.config/monobox/config.yaml`)** — persist default theme, metrics refresh interval, log line & tail limits & timestamps
 - **Container Inspection DX (`E` & `H`)** — interactive Environment Variables modal (`E`), Healthcheck probe logs modal (`H`), Mounts & Network details
 - **Metrics & High-Load Alerts (`⚡` / `🔥`)** — visual warning badges when CPU/Memory usage exceeds 80% or 90%
 - **Clean Port Mapping** — deduplicated host-to-container port mapping (e.g. `5115 ➔ 8080/tcp`) and host URL (`http://localhost:5115`)
