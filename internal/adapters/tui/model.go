@@ -19,7 +19,7 @@ import (
 	"github.com/JoaoOliveira889/monobox/internal/pkg/ui"
 )
 
-var Version = "0.0.4"
+var Version = "0.0.5"
 
 const (
 	minTerminalWidth  = 40
