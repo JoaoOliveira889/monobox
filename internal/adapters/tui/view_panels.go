@@ -137,14 +137,10 @@ func (m *Model) renderContainerListContent() string {
 
 func (m *Model) renderProjectHeaderRow(index int, node TreeNode, maxWidth int) string {
 	selected := index == m.cursor
-	var bgStyle lipgloss.Style
-	if selected {
-		bgStyle = lipgloss.NewStyle().Background(ui.ColorHighlight)
-	}
 
 	var prefix string
 	if selected {
-		prefix = bgStyle.Foreground(ui.ColorBg).Render("▌ ")
+		prefix = "▍ "
 	} else {
 		prefix = "  "
 	}
@@ -153,16 +149,12 @@ func (m *Model) renderProjectHeaderRow(index int, node TreeNode, maxWidth int) s
 	if !node.Expanded {
 		toggleIcon = "[+] "
 	}
-	if selected {
-		toggleIcon = bgStyle.Foreground(ui.ColorBg).Bold(true).Render(toggleIcon)
-	} else {
+	if !selected {
 		toggleIcon = lipgloss.NewStyle().Foreground(ui.ColorBox).Bold(true).Render(toggleIcon)
 	}
 
 	projName := node.ProjectName
-	if selected {
-		projName = bgStyle.Foreground(ui.ColorBg).Bold(true).Render(projName)
-	} else {
+	if !selected {
 		projName = lipgloss.NewStyle().Foreground(ui.ColorFg).Bold(true).Render(projName)
 	}
 
@@ -171,7 +163,7 @@ func (m *Model) renderProjectHeaderRow(index int, node TreeNode, maxWidth int) s
 		badge = fmt.Sprintf("(%d/%d running)", node.RunningCount, node.TotalCount)
 	}
 	if selected {
-		badge = bgStyle.Foreground(ui.ColorBg).Render(" " + badge)
+		badge = " " + badge
 	} else {
 		badge = ui.SubtleStyle.Render(" " + badge)
 	}
@@ -181,13 +173,12 @@ func (m *Model) renderProjectHeaderRow(index int, node TreeNode, maxWidth int) s
 
 	if leftWidth < maxWidth {
 		padding := strings.Repeat(" ", maxWidth-leftWidth)
-		if selected {
-			left += bgStyle.Render(padding)
-		} else {
-			left += padding
-		}
+		left += padding
 	} else if leftWidth > maxWidth {
 		left = truncateRunes(left, maxWidth)
+	}
+	if selected {
+		return ui.SelectedItemStyle.Render(left)
 	}
 	return left
 }
@@ -195,14 +186,10 @@ func (m *Model) renderProjectHeaderRow(index int, node TreeNode, maxWidth int) s
 func (m *Model) renderContainerRow(index int, node TreeNode, maxWidth int) string {
 	c := *node.Container
 	selected := index == m.cursor
-	var bgStyle lipgloss.Style
-	if selected {
-		bgStyle = lipgloss.NewStyle().Background(ui.ColorHighlight)
-	}
 
 	var prefix string
 	if selected {
-		prefix = bgStyle.Foreground(ui.ColorBg).Render("▌ ")
+		prefix = "▍ "
 	} else {
 		prefix = "  "
 	}
@@ -214,23 +201,20 @@ func (m *Model) renderContainerRow(index int, node TreeNode, maxWidth int) strin
 		} else {
 			treeBranch = "├─ "
 		}
-		if selected {
-			treeBranch = bgStyle.Foreground(ui.ColorBg).Render(treeBranch)
-		} else {
+		if !selected {
 			treeBranch = ui.SubtleStyle.Render(treeBranch)
 		}
 	}
 
 	iconStr, _ := containerIconAndLabel(c.Container)
-	iconStr += " "
-	iconCellWidth := lipgloss.Width(iconStr)
-	if selected {
-		iconStr = bgStyle.Render(iconStr)
+	if padding := iconWidth - lipgloss.Width(iconStr); padding > 0 {
+		iconStr += strings.Repeat(" ", padding)
 	}
+	iconCellWidth := iconWidth
 
 	var statusBadge string
 	if selected {
-		statusBadge = bgStyle.Foreground(ui.ColorBg).Bold(true).Render(statusBadgeText(c, maxWidth))
+		statusBadge = statusBadgeText(c, maxWidth)
 	} else {
 		statusBadge = statusBadgeStyled(c, maxWidth)
 	}
@@ -252,33 +236,29 @@ func (m *Model) renderContainerRow(index int, node TreeNode, maxWidth int) strin
 
 	var nameStr string
 	if selected {
-		nameStr = bgStyle.Foreground(ui.ColorBg).Bold(true).Render(name)
+		nameStr = name
 	} else {
 		nameStr = lipgloss.NewStyle().Foreground(ui.ColorFg).Render(name)
 	}
 
-	leftContent := prefix + treeBranch + iconStr + nameStr
+	leftContent := prefix + treeBranch + iconStr + " " + nameStr
 	leftWidth := lipgloss.Width(leftContent)
 	gapLen := maxWidth - leftWidth - statusWidth
 	if gapLen < 1 {
 		gapLen = 1
 	}
 	gap := strings.Repeat(" ", gapLen)
-	if selected {
-		gap = bgStyle.Render(gap)
-	}
 
 	row := leftContent + gap + statusBadge
 	rowWidth := lipgloss.Width(row)
 	if rowWidth < maxWidth {
 		padding := strings.Repeat(" ", maxWidth-rowWidth)
-		if selected {
-			row += bgStyle.Render(padding)
-		} else {
-			row += padding
-		}
+		row += padding
 	} else if rowWidth > maxWidth {
 		row = truncateRunes(row, maxWidth)
+	}
+	if selected {
+		return ui.SelectedItemStyle.Render(row)
 	}
 
 	return row
@@ -667,25 +647,35 @@ func (m *Model) renderDetailPanel(width, height int) string {
 		}
 		cardLines = append(cardLines, "")
 		cardLines = append(cardLines, ui.SubtleStyle.Render("  "+strings.Repeat("─", divWidth)))
-		cardLines = append(cardLines, ui.LabelStyle.Render("  ACTIONS & LOGS:"))
-		cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press Enter / l / 2 to open live log stream"))
+		cardLines = append(cardLines, ui.LabelStyle.Render("  QUICK ACTIONS"))
+		shortcuts := []string{
+			renderDetailShortcut("enter", "logs"),
+			renderDetailShortcut("i", "inspect"),
+			renderDetailShortcut("r", "restart"),
+		}
 		if c.IsRunning() {
-			cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press e / x to exec shell (/bin/sh)"))
-			cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press E to view Environment Variables"))
-			cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press H to view Healthcheck Logs"))
-			cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press s to stop container"))
-			cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press p to pause container"))
+			shortcuts = append(shortcuts,
+				renderDetailShortcut("e", "shell"),
+				renderDetailShortcut("E", "environment"),
+				renderDetailShortcut("H", "health logs"),
+				renderDetailShortcut("s", "stop"),
+				renderDetailShortcut("p", "pause"),
+			)
 		} else if c.Status == domain.StatusPaused {
-			cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press p to unpause container"))
+			shortcuts = append(shortcuts, renderDetailShortcut("p", "unpause"))
 		} else {
-			cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press s to start container"))
+			shortcuts = append(shortcuts, renderDetailShortcut("s", "start"))
 		}
-		cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press r to restart container"))
-		cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press i to inspect configuration"))
 		if extractHostPort(c.Ports) != "" {
-			cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press o to open in browser"))
+			shortcuts = append(shortcuts, renderDetailShortcut("o", "open"))
 		}
-		cardLines = append(cardLines, ui.SubtleStyle.Render("   ▸ Press d / delete to remove container"))
+		shortcuts = append(shortcuts,
+			renderDetailShortcut("d", "remove"),
+			renderDetailShortcut("?", "all shortcuts"),
+		)
+		for _, line := range wrapDetailShortcuts(shortcuts, divWidth) {
+			cardLines = append(cardLines, "  "+line)
+		}
 
 		if len(m.logLines) > 0 {
 			cardLines = append(cardLines, "")
@@ -707,6 +697,33 @@ func (m *Model) renderDetailPanel(width, height int) string {
 
 	accent := lipgloss.Color(ui.ColorBox)
 	return m.renderTitledPanel(width, height, title, content, m.activePanel == LogsPanel, accent)
+}
+
+func renderDetailShortcut(key, label string) string {
+	return ui.FooterKeyStyle.Render("["+key+"]") + " " + ui.SubtleStyle.Render(label)
+}
+
+func wrapDetailShortcuts(shortcuts []string, maxWidth int) []string {
+	const separator = "  "
+	var lines []string
+	current := ""
+
+	for _, shortcut := range shortcuts {
+		candidate := shortcut
+		if current != "" {
+			candidate = current + separator + shortcut
+		}
+		if current != "" && lipgloss.Width(candidate) > maxWidth {
+			lines = append(lines, current)
+			current = shortcut
+			continue
+		}
+		current = candidate
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	return lines
 }
 
 func renderViewportWithScrollbar(vp viewport.Model, active bool) string {

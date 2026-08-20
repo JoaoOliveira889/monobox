@@ -20,7 +20,7 @@ Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Lip Gloss]
 ## Features
 
 - **Auto-detect engine** — Docker first, then Podman; clear error if neither is available
-- **Container list** — icon per service type, name, status badge, and uptime
+- **Focused dashboard** — compact engine summary, stable-width service icons, high-contrast selection, and contextual quick actions
 - **Live log streaming** — real-time `docker logs -f` / `podman logs -f` with follow mode, log export (`s`), and Regex pattern search (`Ctrl+R`)
 - **Lifecycle actions** — start/stop toggle, pause/unpause, and restart with optimistic UI updates
 - **Historical Metrics Graph (`g`)** — full-screen CPU & Memory timeline chart with min/max/current stats

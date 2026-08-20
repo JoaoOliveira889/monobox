@@ -31,7 +31,6 @@ const (
 	refreshInterval = 5 * time.Second
 
 	statusClearDuration = 3 * time.Second
-	spinnerTickInterval = 80 * time.Millisecond
 	splashDuration      = 1500 * time.Millisecond
 
 	defaultRatio      = 0.40
@@ -160,8 +159,7 @@ type Model struct {
 	statusMsg   string
 	statusMsgID int
 
-	spinnerFrame int
-	loading      bool
+	loading bool
 
 	quitting bool
 }
@@ -222,7 +220,6 @@ func NewModel(provider domain.ContainerProvider, engineName string) Model {
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.loadContainersCmd(),
-		spinnerTickCmd(),
 		splashTickCmd(),
 	)
 }
@@ -420,7 +417,7 @@ func (m *Model) appendLogLine(line string) {
 var spinnerFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
 
 func (m *Model) spinnerView() string {
-	return spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+	return spinnerFrames[m.splashFrame%len(spinnerFrames)]
 }
 
 func (m *Model) refreshListViewport() {

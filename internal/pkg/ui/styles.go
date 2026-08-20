@@ -300,7 +300,6 @@ func ApplyTheme(name string) {
 		Bold(true)
 
 	FooterStyle = lipgloss.NewStyle().
-		Background(ColorBg).
 		Foreground(ColorSubtle).
 		Padding(0, 1)
 
@@ -321,8 +320,8 @@ func ApplyTheme(name string) {
 		Bold(true)
 
 	SelectedItemStyle = lipgloss.NewStyle().
-		Background(ColorHighlight).
-		Foreground(ColorBg).
+		Background(ColorSelected).
+		Foreground(ColorFg).
 		Bold(true)
 
 	NormalItemStyle = lipgloss.NewStyle().

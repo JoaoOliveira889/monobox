@@ -164,12 +164,6 @@ func newLogScanner(r io.Reader) *bufio.Scanner {
 	return sc
 }
 
-func spinnerTickCmd() tea.Cmd {
-	return tea.Tick(spinnerTickInterval, func(time.Time) tea.Msg {
-		return spinnerTickMsg{}
-	})
-}
-
 func splashTickCmd() tea.Cmd {
 	return tea.Tick(90*time.Millisecond, func(time.Time) tea.Msg {
 		return splashTickMsg{}

@@ -48,8 +48,6 @@ type logStreamDoneMsg struct {
 	containerID string
 }
 
-type spinnerTickMsg struct{}
-
 type splashTickMsg struct{}
 
 type execDoneMsg struct {

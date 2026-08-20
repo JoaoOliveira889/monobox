@@ -17,9 +17,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		cmd = m.handleResize(msg)
-	case spinnerTickMsg:
-		m.spinnerFrame++
-		cmd = spinnerTickCmd()
 	case splashTickMsg:
 		if m.showSplash {
 			m.splashFrame++

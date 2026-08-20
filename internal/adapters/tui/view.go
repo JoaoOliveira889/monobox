@@ -134,9 +134,13 @@ func (m *Model) renderHeader() string {
 		brand = renderBrandWordmark(true)
 	}
 
-	var stats string
-	if m.width >= 50 {
-		stats = fmt.Sprintf("%d containers ", len(m.containers))
+	engine := strings.ToLower(strings.TrimSpace(m.engine))
+	if engine == "" {
+		engine = "container engine"
+	}
+	engineLabel := ""
+	if m.width >= 48 {
+		engineLabel = ui.SubtleStyle.Render(engine)
 	}
 
 	loading := ""
@@ -149,7 +153,7 @@ func (m *Model) renderHeader() string {
 	}
 
 	brandW := lipgloss.Width(brand)
-	statsW := lipgloss.Width(stats)
+	engineW := lipgloss.Width(engineLabel)
 	loadingW := lipgloss.Width(loading)
 
 	maxW := m.width - 1
@@ -157,7 +161,7 @@ func (m *Model) renderHeader() string {
 		maxW = 10
 	}
 
-	spacerLen := maxW - brandW - statsW - loadingW - 2
+	spacerLen := maxW - brandW - engineW - loadingW - 4
 	if spacerLen < 0 {
 		spacerLen = 0
 	}
@@ -165,9 +169,10 @@ func (m *Model) renderHeader() string {
 
 	headerLine := " " + lipgloss.JoinHorizontal(lipgloss.Bottom,
 		brand,
+		"  ",
+		engineLabel,
 		spacer,
 		loading,
-		ui.SubtleStyle.Render(stats),
 	) + " "
 
 	if lipgloss.Width(headerLine) > maxW {
@@ -222,10 +227,8 @@ func (m *Model) renderHeaderStatusBar() string {
 		}
 	}
 
-	dot := lipgloss.NewStyle().Foreground(ui.ColorSuccess).Render("●")
-
 	if total > 0 {
-		parts = append(parts, fmt.Sprintf("%d containers", total))
+		parts = append(parts, ui.ValueStyle.Render(fmt.Sprintf("%d containers", total)))
 		parts = append(parts, ui.RunningStyle.Render(fmt.Sprintf("%d running", running)))
 		if stopped > 0 {
 			parts = append(parts, ui.StoppedStyle.Render(fmt.Sprintf("%d stopped", stopped)))
@@ -234,21 +237,28 @@ func (m *Model) renderHeaderStatusBar() string {
 			parts = append(parts, ui.WarningStyle.Render(fmt.Sprintf("⚡ %d high load", highLoadCount)))
 		}
 		if running > 0 {
-			engName := strings.ToLower(m.engine)
-			if engName == "" {
-				engName = "engine"
-			}
-			engineMetric := fmt.Sprintf("%s: %.2f%% CPU • %s", engName, totalCPU, formatBytes(totalMemBytes))
-			parts = append(parts, lipgloss.NewStyle().Foreground(ui.ColorHighlight).Bold(true).Render(engineMetric))
+			parts = append(parts, lipgloss.NewStyle().Foreground(ui.ColorHighlight).Bold(true).Render(fmt.Sprintf("%.2f%% CPU", totalCPU)))
+			parts = append(parts, lipgloss.NewStyle().Foreground(ui.ColorCyan).Bold(true).Render(formatBytes(totalMemBytes)))
 		}
 	} else if !m.loading {
 		parts = append(parts, "No containers found")
 	}
 
-	sep := ui.SubtleStyle.Render("  •  ")
-	barText := " " + dot + " " + strings.Join(parts, sep)
+	sep := ui.SubtleStyle.Render("  ·  ")
+	barText := " " + fitInlineParts(parts, sep, maxW-2)
 
 	return ui.SubtleStyle.MaxWidth(maxW).Render(barText)
+}
+
+func fitInlineParts(parts []string, separator string, maxWidth int) string {
+	for len(parts) > 0 {
+		content := strings.Join(parts, separator)
+		if lipgloss.Width(content) <= maxWidth {
+			return content
+		}
+		parts = parts[:len(parts)-1]
+	}
+	return ""
 }
 
 func parseCPUVal(cpuStr string) float64 {
@@ -380,16 +390,11 @@ func (m *Model) renderFooter() string {
 	} else {
 		parts = []string{
 			m.fmtKey("↑↓/jk", "nav"),
-			m.fmtKey("?", "help"),
 			m.fmtKey("/", "filter"),
-			m.fmtKey("e", "exec"),
-			m.fmtKey("i", "inspect"),
+			m.fmtKey("enter", "logs"),
 			m.fmtKey("s", "start/stop"),
-			m.fmtKey("p", "pause"),
-			m.fmtKey("d", "remove"),
-			m.fmtKey("o", "open"),
 			m.fmtKey("r", "restart"),
-			m.fmtKey("T", "theme"),
+			m.fmtKey("?", "shortcuts"),
 			m.fmtKey("q", "quit"),
 		}
 	}
