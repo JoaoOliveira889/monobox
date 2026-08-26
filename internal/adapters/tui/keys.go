@@ -34,6 +34,15 @@ type keyMap struct {
 	HealthModal      []string
 	Graph            []string
 	ToggleRegex      []string
+	CopyID           []string
+	CopyInfo         []string
+	Prune            []string
+	ComposeUp        []string
+	ComposeDown      []string
+	NextMatch        []string
+	PrevMatch        []string
+	SettingsModal    []string
+	SeverityFilter   []string
 }
 
 var keys = keyMap{
@@ -68,6 +77,15 @@ var keys = keyMap{
 	HealthModal:      []string{"H"},
 	Graph:            []string{"g"},
 	ToggleRegex:      []string{"ctrl+r"},
+	CopyID:           []string{"y"},
+	CopyInfo:         []string{"Y"},
+	Prune:            []string{"P"},
+	ComposeUp:        []string{"u"},
+	ComposeDown:      []string{"D"},
+	NextMatch:        []string{"n"},
+	PrevMatch:        []string{"N"},
+	SettingsModal:    []string{"S"},
+	SeverityFilter:   []string{"!"},
 }
 
 func matchesKey(msg tea.KeyMsg, ks ...string) bool {

@@ -27,29 +27,17 @@ type dockerContainer struct {
 	Labels     json.RawMessage `json:"Labels"`
 }
 
-type DockerProvider struct{}
+type DockerProvider struct {
+	CLIProvider
+}
 
-func NewDockerProvider() *DockerProvider { return &DockerProvider{} }
-
-func (d *DockerProvider) EngineName() domain.Engine { return domain.EngineDocker }
-
-func (d *DockerProvider) List() ([]domain.Container, error) {
-	out, err := exec.Command(
-		"docker", "ps", "-a",
-		"--no-trunc",
-		"--format", "{{json .}}",
-	).Output()
-	if err != nil {
-		return nil, fmt.Errorf("docker ps: %w", err)
+func NewDockerProvider() *DockerProvider {
+	return &DockerProvider{
+		CLIProvider: CLIProvider{
+			binary: "docker",
+			engine: domain.EngineDocker,
+		},
 	}
-	containers, err := parseDockerJSON(out, domain.EngineDocker)
-	if err != nil {
-		return nil, err
-	}
-	if statsMap, err := d.Stats(); err == nil {
-		applyStats(containers, statsMap)
-	}
-	return containers, nil
 }
 
 type dockerStatsJSON struct {
@@ -58,10 +46,6 @@ type dockerStatsJSON struct {
 	CPUPerc  string `json:"CPUPerc"`
 	MemUsage string `json:"MemUsage"`
 	MemPerc  string `json:"MemPerc"`
-}
-
-func (d *DockerProvider) Stats() (map[string]domain.ContainerStats, error) {
-	return engineStats("docker")
 }
 
 func engineStats(binary string) (map[string]domain.ContainerStats, error) {
@@ -158,52 +142,7 @@ func isDockerJSONLogPath(logPath string) bool {
 		strings.HasSuffix(cleanPath, "-json.log")
 }
 
-func (d *DockerProvider) Start(id string) error {
-	return runCmd("docker", "start", id)
-}
 
-func (d *DockerProvider) Stop(id string) error {
-	return runCmd("docker", "stop", id)
-}
-
-func (d *DockerProvider) Restart(id string) error {
-	return runCmd("docker", "restart", id)
-}
-
-func (d *DockerProvider) Pause(id string) error {
-	return runCmd("docker", "pause", id)
-}
-
-func (d *DockerProvider) Unpause(id string) error {
-	return runCmd("docker", "unpause", id)
-}
-
-func (d *DockerProvider) Remove(id string, force bool) error {
-	if force {
-		return runCmd("docker", "rm", "-f", id)
-	}
-	return runCmd("docker", "rm", id)
-}
-
-func (d *DockerProvider) Inspect(id string) (string, error) {
-	out, err := exec.Command("docker", "inspect", id).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("docker inspect %s: %s", id, strings.TrimSpace(string(out)))
-	}
-	var pretty bytes.Buffer
-	if jsonErr := json.Indent(&pretty, out, "", "  "); jsonErr == nil {
-		return pretty.String(), nil
-	}
-	return string(out), nil
-}
-
-func (d *DockerProvider) ExecCmd(id string) *exec.Cmd {
-	return exec.Command("docker", "exec", "-it", id, "/bin/sh")
-}
-
-func (d *DockerProvider) Logs(ctx context.Context, id string, tail int, follow bool, timestamps bool) (io.ReadCloser, error) {
-	return dockerLogs(ctx, "docker", id, tail, follow, timestamps)
-}
 
 func dockerLogs(ctx context.Context, binary, id string, tail int, follow bool, timestamps bool) (io.ReadCloser, error) {
 	args := []string{"logs"}

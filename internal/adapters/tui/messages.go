@@ -5,11 +5,18 @@ import (
 	"context"
 	"io"
 	"time"
+
+	"github.com/JoaoOliveira889/monobox/internal/domain"
 )
 
 type containersLoadedMsg struct {
 	containers []containerItem
 	err        error
+}
+
+type statsLoadedMsg struct {
+	stats map[string]domain.ContainerStats
+	err   error
 }
 
 type containerActionDoneMsg struct {
@@ -63,3 +70,14 @@ type inspectDoneMsg struct {
 type clearStatusMsg struct{ id int }
 
 type tickMsg time.Time
+
+type pruneDoneMsg struct {
+	output string
+	err    error
+}
+
+type composeActionDoneMsg struct {
+	project string
+	action  string
+	err     error
+}

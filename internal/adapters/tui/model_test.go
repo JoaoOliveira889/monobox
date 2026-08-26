@@ -40,6 +40,10 @@ func (s *stubProvider) ExecCmd(_ string) *exec.Cmd {
 func (s *stubProvider) Logs(_ context.Context, _ string, _ int, _ bool, _ bool) (io.ReadCloser, error) {
 	return nil, nil
 }
+func (s *stubProvider) SystemPrune(_ bool) (string, error) { return "Total reclaimed space: 0B", nil }
+func (s *stubProvider) ComposeUp(_ string) error           { return nil }
+func (s *stubProvider) ComposeDown(_ string) error         { return nil }
+
 
 // TestNewModel verifies the initial model state.
 func TestNewModel(t *testing.T) {
@@ -116,14 +120,24 @@ func TestStatsHistoryAccumulation(t *testing.T) {
 	m := tui.NewModel(stub, "docker")
 
 	step1 := []domain.Container{
-		{ID: "c1", Name: "app", Status: domain.StatusRunning, CPU: "5.0%", Mem: "100MiB (10.0%)"},
+		{ID: "c1", Name: "app", Status: domain.StatusRunning},
 	}
+	stats1 := map[string]domain.ContainerStats{
+		"c1": {CPU: "5.0%", MemPerc: "10.0%"},
+	}
+
 	step2 := []domain.Container{
-		{ID: "c1", Name: "app", Status: domain.StatusRunning, CPU: "15.0%", Mem: "120MiB (12.0%)"},
+		{ID: "c1", Name: "app", Status: domain.StatusRunning},
+	}
+	stats2 := map[string]domain.ContainerStats{
+		"c1": {CPU: "15.0%", MemPerc: "12.0%"},
 	}
 
 	m.ApplyContainersLoaded(step1)
+	m.ApplyStats(stats1)
+	
 	m.ApplyContainersLoaded(step2)
+	m.ApplyStats(stats2)
 
 	cpu, mem := m.GetStatsHistory("c1")
 	if len(cpu) != 2 || cpu[0] != 5.0 || cpu[1] != 15.0 {

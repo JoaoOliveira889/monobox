@@ -3,6 +3,7 @@ package tui
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"regexp"
 	"sort"
@@ -19,7 +20,7 @@ import (
 	"github.com/JoaoOliveira889/monobox/internal/pkg/ui"
 )
 
-var Version = "0.0.5"
+var Version = "0.0.6"
 
 const (
 	minTerminalWidth  = 40
@@ -133,6 +134,7 @@ type Model struct {
 	graphViewport   viewport.Model
 
 	showEnvModal    bool
+	envMaskSecrets  bool
 	showHealthModal bool
 	showGraphModal  bool
 	showHelp        bool
@@ -140,7 +142,22 @@ type Model struct {
 	themeCursor     int
 	initialTheme    string
 
-	logRegexSearch bool
+	showPruneModal bool
+	pruneAll       bool
+
+	showSettingsModal bool
+	settingsCursor    int
+	settingsEditing   bool
+	settingsInput     textinput.Model
+
+	logSeverityFilter   int // 0: ALL, 1: INFO+, 2: WARN+, 3: ERROR
+	logMatchCount       int
+	logMatchIndex       int
+	logMatchLineIndices []int
+
+	logRegexSearch   bool
+	logCompiledRegex *regexp.Regexp
+	logRegexError    string
 
 	confirmPortConflict  bool
 	conflictingContainer string
@@ -162,6 +179,9 @@ type Model struct {
 	loading bool
 
 	quitting bool
+
+	cachedTreeNodes []TreeNode
+	treeNodesDirty  bool
 }
 
 func NewModel(provider domain.ContainerProvider, engineName string) Model {
@@ -190,6 +210,10 @@ func NewModel(provider domain.ContainerProvider, engineName string) Model {
 	tiSearch.Prompt = "🔍 "
 	tiSearch.CharLimit = 50
 
+	tiSettings := textinput.New()
+	tiSettings.Placeholder = "value"
+	tiSettings.CharLimit = 40
+
 	return Model{
 		provider:            provider,
 		engine:              engineName,
@@ -201,6 +225,7 @@ func NewModel(provider domain.ContainerProvider, engineName string) Model {
 		leftPanelRatio:      defaultRatio,
 		filterInput:         ti,
 		logSearchInput:      tiSearch,
+		settingsInput:       tiSettings,
 		logViewport:         viewport.New(0, 0),
 		listViewport:        viewport.New(0, 0),
 		inspectViewport:     viewport.New(0, 0),
@@ -211,15 +236,18 @@ func NewModel(provider domain.ContainerProvider, engineName string) Model {
 		loading:             true,
 		logFollow:           true,
 		showSplash:          true,
+		envMaskSecrets:      true,
 		expandedProjects:    make(map[string]bool),
 		statsHistory:        make(map[string]*StatsHistory),
 		inspectDetailsCache: make(map[string]*domain.ContainerInspectDetails),
+		treeNodesDirty:      true,
 	}
 }
 
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.loadContainersCmd(),
+		m.loadStatsCmd(),
 		splashTickCmd(),
 	)
 }
@@ -277,11 +305,23 @@ func (m *Model) toggleProjectExpanded(proj string) {
 		m.expandedProjects = make(map[string]bool)
 	}
 	m.expandedProjects[proj] = !m.isProjectExpanded(proj)
+	m.invalidateTreeNodes()
+}
+
+func (m *Model) invalidateTreeNodes() {
+	m.treeNodesDirty = true
+	m.cachedTreeNodes = nil
 }
 
 func (m *Model) VisibleTreeNodes() []TreeNode {
+	if !m.treeNodesDirty && m.cachedTreeNodes != nil {
+		return m.cachedTreeNodes
+	}
+
 	filtered := m.FilteredContainers()
 	if len(filtered) == 0 {
+		m.cachedTreeNodes = nil
+		m.treeNodesDirty = false
 		return nil
 	}
 
@@ -348,6 +388,8 @@ func (m *Model) VisibleTreeNodes() []TreeNode {
 		})
 	}
 
+	m.cachedTreeNodes = nodes
+	m.treeNodesDirty = false
 	return nodes
 }
 
@@ -414,6 +456,23 @@ func (m *Model) appendLogLine(line string) {
 	}
 }
 
+func (m *Model) recompileLogRegex() {
+	query := strings.TrimSpace(m.logSearchQuery)
+	if query == "" || !m.logRegexSearch {
+		m.logCompiledRegex = nil
+		m.logRegexError = ""
+		return
+	}
+	re, err := regexp.Compile("(?i)" + query)
+	if err != nil {
+		m.logCompiledRegex = nil
+		m.logRegexError = err.Error()
+	} else {
+		m.logCompiledRegex = re
+		m.logRegexError = ""
+	}
+}
+
 var spinnerFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
 
 func (m *Model) spinnerView() string {
@@ -444,24 +503,62 @@ func (m *Model) ensureSelectedContainerVisible() {
 	}
 }
 
+func matchSeverity(line string, severity int) bool {
+	if severity <= 0 {
+		return true
+	}
+	upper := strings.ToUpper(line)
+	isErr := strings.Contains(upper, "ERROR") || strings.Contains(upper, "FATAL") || strings.Contains(upper, "PANIC") || strings.Contains(upper, " 500 ") || strings.Contains(upper, "ERR")
+	isWarn := strings.Contains(upper, "WARN") || strings.Contains(upper, "WARNING")
+	isInfo := strings.Contains(upper, "INFO")
+	switch severity {
+	case 1: // INFO+
+		return isInfo || isWarn || isErr
+	case 2: // WARN+
+		return isWarn || isErr
+	case 3: // ERROR only
+		return isErr
+	default:
+		return true
+	}
+}
+
 func (m *Model) refreshLogViewportContent() {
 	if len(m.logLines) == 0 {
 		m.logViewport.SetContent("")
+		m.logMatchCount = 0
+		m.logMatchIndex = 0
+		m.logMatchLineIndices = nil
 		return
 	}
 	query := strings.TrimSpace(m.logSearchQuery)
 	var formatted []string
+	var matchIndices []int
 
 	if query != "" && m.logRegexSearch {
-		re, err := regexp.Compile("(?i)" + query)
-		if err != nil {
-			m.logViewport.SetContent(ui.ErrorStyle.Render(" Invalid regex pattern: " + err.Error()))
+		if m.logRegexError != "" {
+			m.logViewport.SetContent(ui.ErrorStyle.Render(" Invalid regex pattern: " + m.logRegexError))
+			m.logMatchCount = 0
+			m.logMatchIndex = 0
+			m.logMatchLineIndices = nil
+			return
+		}
+		re := m.logCompiledRegex
+		if re == nil {
+			m.logViewport.SetContent(ui.SubtleStyle.Render(" Enter a regex pattern…"))
+			m.logMatchCount = 0
+			m.logMatchIndex = 0
+			m.logMatchLineIndices = nil
 			return
 		}
 		for _, line := range m.logLines {
+			if !matchSeverity(line, m.logSeverityFilter) {
+				continue
+			}
 			if !re.MatchString(line) {
 				continue
 			}
+			matchIndices = append(matchIndices, len(formatted))
 			matchStyle := lipgloss.NewStyle().Background(lipgloss.Color("#e0af68")).Foreground(lipgloss.Color("#1a1b26")).Bold(true)
 			highlighted := re.ReplaceAllStringFunc(line, func(match string) string {
 				return matchStyle.Render(match)
@@ -471,15 +568,31 @@ func (m *Model) refreshLogViewportContent() {
 	} else {
 		queryLower := strings.ToLower(query)
 		for _, line := range m.logLines {
+			if !matchSeverity(line, m.logSeverityFilter) {
+				continue
+			}
 			if queryLower != "" && !strings.Contains(strings.ToLower(line), queryLower) {
 				continue
+			}
+			if queryLower != "" {
+				matchIndices = append(matchIndices, len(formatted))
 			}
 			formatted = append(formatted, highlightLogLine(line, query))
 		}
 	}
 
-	if len(formatted) == 0 && query != "" {
-		m.logViewport.SetContent(ui.SubtleStyle.Render(" No logs matching filter: " + m.logSearchQuery))
+	m.logMatchCount = len(matchIndices)
+	m.logMatchLineIndices = matchIndices
+	if m.logMatchCount > 0 {
+		if m.logMatchIndex <= 0 || m.logMatchIndex > m.logMatchCount {
+			m.logMatchIndex = 1
+		}
+	} else {
+		m.logMatchIndex = 0
+	}
+
+	if len(formatted) == 0 && (query != "" || m.logSeverityFilter > 0) {
+		m.logViewport.SetContent(ui.SubtleStyle.Render(" No logs matching filter"))
 		return
 	}
 	m.logViewport.SetContent(strings.Join(formatted, "\n"))
@@ -611,11 +724,28 @@ func sortContainerItems(items []containerItem) {
 	})
 }
 
-func (m *Model) ApplyContainersLoaded(list []domain.Container) {
+func (m *Model) ApplyStats(statsMap map[string]domain.ContainerStats) {
+	for i, c := range m.containers {
+		var st domain.ContainerStats
+		var ok bool
+		if st, ok = statsMap[c.ID]; !ok {
+			st, ok = statsMap[c.Name]
+		}
+		if !ok {
+			continue
+		}
+		m.containers[i].CPU = st.CPU
+		if st.MemPerc != "" {
+			m.containers[i].Mem = fmt.Sprintf("%s (%s)", st.Mem, st.MemPerc)
+		} else {
+			m.containers[i].Mem = st.Mem
+		}
+	}
+	// Update stats history
 	if m.statsHistory == nil {
 		m.statsHistory = make(map[string]*StatsHistory)
 	}
-	for _, c := range list {
+	for _, c := range m.containers {
 		key := c.ID
 		if key == "" {
 			key = c.Name
@@ -641,7 +771,12 @@ func (m *Model) ApplyContainersLoaded(list []domain.Container) {
 			}
 		}
 	}
+	m.invalidateTreeNodes()
+}
 
+func (m *Model) ApplyContainersLoaded(list []domain.Container) {
+	m.showSplash = false
+	m.loading = false
 	var prevID string
 	var prevProj string
 	if node := m.selectedNode(); node != nil {
@@ -658,6 +793,7 @@ func (m *Model) ApplyContainersLoaded(list []domain.Container) {
 	}
 	sortContainerItems(items)
 	m.containers = items
+	m.invalidateTreeNodes()
 
 	nodes := m.VisibleTreeNodes()
 	if prevID != "" {
@@ -713,4 +849,22 @@ func extractHostPort(portsStr string) string {
 		}
 	}
 	return ""
+}
+
+func isSensitiveKey(key string) bool {
+	upper := strings.ToUpper(key)
+	sensitivePatterns := []string{"_KEY", "_SECRET", "_PASSWORD", "_TOKEN", "_API_KEY", "CREDENTIAL", "_PASS", "_PRIVATE"}
+	for _, pattern := range sensitivePatterns {
+		if strings.Contains(upper, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func maskValue(value string) string {
+	if len(value) <= 4 {
+		return "••••••••"
+	}
+	return value[:2] + "••••••" + value[len(value)-2:]
 }

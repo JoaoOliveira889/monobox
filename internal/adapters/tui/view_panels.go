@@ -478,7 +478,12 @@ func (m *Model) renderDetailPanel(width, height int) string {
 		if m.stream != nil {
 			liveStatus = " [live]"
 		}
-		title = fmt.Sprintf("2 Logs — %s %s%s%s", c.Name, followStatus, tsStatus, liveStatus)
+		severityStatus := ""
+		if m.logSeverityFilter > 0 && m.logSeverityFilter < 4 {
+			names := []string{"", " [sev: INFO+]", " [sev: WARN+]", " [sev: ERROR]"}
+			severityStatus = names[m.logSeverityFilter]
+		}
+		title = fmt.Sprintf("2 Logs — %s %s%s%s%s", c.Name, followStatus, tsStatus, liveStatus, severityStatus)
 		vpView := renderViewportWithScrollbar(m.logViewport, true)
 		if len(m.logLines) == 0 {
 			if m.stream != nil {
@@ -489,7 +494,13 @@ func (m *Model) renderDetailPanel(width, height int) string {
 		}
 
 		if m.logSearching || m.logSearchQuery != "" {
-			m.logSearchInput.Width = width - 4
+			counter := ""
+			if m.logMatchCount > 0 {
+				counter = fmt.Sprintf(" [%d/%d]", m.logMatchIndex, m.logMatchCount)
+			} else if m.logSearchQuery != "" {
+				counter = " [0/0]"
+			}
+			m.logSearchInput.Width = width - 4 - len(counter)
 			if m.logSearchInput.Width < 10 {
 				m.logSearchInput.Width = 10
 			}
@@ -498,6 +509,9 @@ func (m *Model) renderDetailPanel(width, height int) string {
 				searchView = lipgloss.NewStyle().Foreground(ui.ColorHighlight).Bold(true).Render(searchView)
 			} else {
 				searchView = ui.SubtleStyle.Render(searchView)
+			}
+			if counter != "" {
+				searchView += ui.HighlightStyle.Render(counter)
 			}
 			content = lipgloss.JoinVertical(lipgloss.Left, "  "+searchView, vpView)
 		} else {

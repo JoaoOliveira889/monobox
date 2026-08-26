@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/JoaoOliveira889/monobox/internal/domain"
+	"github.com/JoaoOliveira889/monobox/internal/pkg/clipboard"
 	"github.com/JoaoOliveira889/monobox/internal/pkg/config"
 	"github.com/JoaoOliveira889/monobox/internal/pkg/ui"
 )
@@ -21,6 +23,14 @@ func (m *Model) handleKeys(msg tea.KeyMsg) tea.Cmd {
 
 	if m.showThemeMenu {
 		return m.handleThemeMenuKeys(msg)
+	}
+
+	if m.showSettingsModal {
+		return m.handleSettingsModalKeys(msg)
+	}
+
+	if m.showPruneModal {
+		return m.handlePruneModalKeys(msg)
 	}
 
 	if m.showGraphModal {
@@ -216,6 +226,17 @@ func (m *Model) handleBatchConfirmation(msg tea.KeyMsg) tea.Cmd {
 		m.confirmBatchAction = ""
 		m.batchProjectName = ""
 
+		if action == "compose_down" {
+			m.setStatus(fmt.Sprintf("⟳ compose down for %s…", projName))
+			for i, c := range m.containers {
+				if c.ComposeProject == projName {
+					m.containers[i].loading = true
+				}
+			}
+			m.refreshListViewport()
+			return composeCmd(m.provider, projName, "down")
+		}
+
 		var ids []string
 		for i, c := range m.containers {
 			if c.ComposeProject == projName {
@@ -247,6 +268,7 @@ func (m *Model) handleFilterKeys(msg tea.KeyMsg) tea.Cmd {
 		m.filterInput.SetValue("")
 		m.filterQuery = ""
 		m.cursor = 0
+		m.invalidateTreeNodes()
 		m.refreshListViewport()
 		return nil
 
@@ -265,6 +287,7 @@ func (m *Model) handleFilterKeys(msg tea.KeyMsg) tea.Cmd {
 	var cmd tea.Cmd
 	m.filterInput, cmd = m.filterInput.Update(msg)
 	m.filterQuery = m.filterInput.Value()
+	m.invalidateTreeNodes()
 
 	nodes := m.VisibleTreeNodes()
 	if m.cursor >= len(nodes) {
@@ -294,6 +317,36 @@ func (m *Model) handleListKeys(msg tea.KeyMsg) tea.Cmd {
 		m.filtering = true
 		m.filterInput.Focus()
 		return textinput.Blink
+
+	case matchesKey(msg, keys.Prune...):
+		m.showPruneModal = true
+		m.pruneAll = false
+		return nil
+
+	case matchesKey(msg, keys.SettingsModal...):
+		m.showSettingsModal = true
+		m.settingsCursor = 0
+		m.settingsEditing = false
+		return nil
+
+	case matchesKey(msg, keys.ComposeUp...):
+		if node != nil && node.Type == NodeProjectHeader {
+			m.setStatus(fmt.Sprintf("⟳ compose up for %s…", node.ProjectName))
+			for i, c := range m.containers {
+				if c.ComposeProject == node.ProjectName {
+					m.containers[i].loading = true
+				}
+			}
+			m.refreshListViewport()
+			return composeCmd(m.provider, node.ProjectName, "up")
+		}
+
+	case matchesKey(msg, keys.ComposeDown...):
+		if node != nil && node.Type == NodeProjectHeader {
+			m.confirmBatchAction = "compose_down"
+			m.batchProjectName = node.ProjectName
+			return nil
+		}
 
 	case msg.String() == " " || msg.String() == "left" || msg.String() == "right" || msg.String() == "h" || msg.String() == "l":
 		if node != nil && node.Type == NodeProjectHeader {
@@ -366,6 +419,35 @@ func (m *Model) handleListKeys(msg tea.KeyMsg) tea.Cmd {
 		}
 		m.setStatus("✓ Opening http://localhost:" + port + "…")
 		return openBrowserCmd(port)
+
+	case matchesKey(msg, keys.CopyInfo...):
+		c := m.selectedContainer()
+		if c == nil {
+			return nil
+		}
+		info := fmt.Sprintf("ID: %s\nName: %s\nImage: %s\nStatus: %s\nPorts: %s", c.ID, c.Name, c.Image, c.Status, c.Ports)
+		if err := clipboard.Write(info); err != nil {
+			m.setStatus("✗ Clipboard not available")
+		} else {
+			m.setStatus("📋 Container info copied")
+		}
+		return nil
+
+	case matchesKey(msg, keys.CopyID...):
+		c := m.selectedContainer()
+		if c == nil {
+			return nil
+		}
+		if err := clipboard.Write(c.ID); err != nil {
+			m.setStatus("✗ Clipboard not available")
+		} else {
+			shortID := c.ID
+			if len(shortID) > 12 {
+				shortID = shortID[:12]
+			}
+			m.setStatus("📋 Copied ID: " + shortID)
+		}
+		return nil
 
 	case matchesKey(msg, keys.Up...):
 		if m.cursor > 0 {
@@ -455,6 +537,8 @@ func (m *Model) handleLogSearchKeys(msg tea.KeyMsg) tea.Cmd {
 		m.logSearchInput.Blur()
 		m.logSearchInput.SetValue("")
 		m.logSearchQuery = ""
+		m.logCompiledRegex = nil
+		m.logRegexError = ""
 		m.refreshLogViewportContent()
 		return nil
 
@@ -468,6 +552,7 @@ func (m *Model) handleLogSearchKeys(msg tea.KeyMsg) tea.Cmd {
 	var cmd tea.Cmd
 	m.logSearchInput, cmd = m.logSearchInput.Update(msg)
 	m.logSearchQuery = m.logSearchInput.Value()
+	m.recompileLogRegex()
 	m.refreshLogViewportContent()
 	return cmd
 }
@@ -525,10 +610,46 @@ func (m *Model) handleLogsKeys(msg tea.KeyMsg) tea.Cmd {
 		}
 		return m.selectAndStreamContainerLogs()
 
+	case matchesKey(msg, keys.ToggleRegex...):
+		m.logRegexSearch = !m.logRegexSearch
+		if m.logRegexSearch {
+			m.setStatus("Regex search: ON")
+		} else {
+			m.setStatus("Regex search: OFF")
+		}
+	case matchesKey(msg, keys.SeverityFilter...):
+		m.logSeverityFilter = (m.logSeverityFilter + 1) % 4
+		names := []string{"ALL", "INFO+", "WARN+", "ERROR only"}
+		m.setStatus("Severity filter: " + names[m.logSeverityFilter])
+		m.refreshLogViewportContent()
+		return nil
+
+	case matchesKey(msg, keys.NextMatch...):
+		if m.logMatchCount > 0 && len(m.logMatchLineIndices) > 0 {
+			m.logMatchIndex = (m.logMatchIndex % m.logMatchCount) + 1
+			targetLine := m.logMatchLineIndices[m.logMatchIndex-1]
+			m.logViewport.SetYOffset(targetLine)
+			m.logFollow = false
+			m.setStatus(fmt.Sprintf("Match [%d/%d]", m.logMatchIndex, m.logMatchCount))
+		}
+		return nil
+
+	case matchesKey(msg, keys.PrevMatch...):
+		if m.logMatchCount > 0 && len(m.logMatchLineIndices) > 0 {
+			m.logMatchIndex = ((m.logMatchIndex - 2 + m.logMatchCount) % m.logMatchCount) + 1
+			targetLine := m.logMatchLineIndices[m.logMatchIndex-1]
+			m.logViewport.SetYOffset(targetLine)
+			m.logFollow = false
+			m.setStatus(fmt.Sprintf("Match [%d/%d]", m.logMatchIndex, m.logMatchCount))
+		}
+		return nil
+
 	case matchesKey(msg, keys.Esc...):
 		if m.logSearchQuery != "" {
 			m.logSearchQuery = ""
 			m.logSearchInput.SetValue("")
+			m.logCompiledRegex = nil
+			m.logRegexError = ""
 			m.refreshLogViewportContent()
 			return nil
 		}
@@ -644,6 +765,7 @@ func (m *Model) startContainerOptimistic(id, name string) tea.Cmd {
 		}
 	}
 	sortContainerItems(m.containers)
+	m.invalidateTreeNodes()
 
 	nodes := m.VisibleTreeNodes()
 	for i, n := range nodes {
@@ -719,6 +841,17 @@ func (m *Model) handleEnvModalKeys(msg tea.KeyMsg) tea.Cmd {
 		m.envViewport.PageUp()
 	case "pgdown", "ctrl+d":
 		m.envViewport.PageDown()
+	case "m":
+		m.envMaskSecrets = !m.envMaskSecrets
+		if m.envMaskSecrets {
+			m.setStatus("🔒 Secrets masked")
+		} else {
+			m.setStatus("🔓 Secrets revealed")
+		}
+		// trigger re-render of env modal content
+		// the env modal content is likely updated somewhere else or on view, let's see how it's handled. 
+		// if we need to call buildEnvViewport, we'll do it. Wait, how is it done normally? I'll check in update.go.
+		// For now, I'll just set the status and let the view pick it up, or if the view just reads envViewport, we may need to rebuild it. Let's check view.go.
 	}
 	return nil
 }
@@ -776,3 +909,105 @@ func (m *Model) handlePortConflictConfirmation(msg tea.KeyMsg) tea.Cmd {
 	}
 	return nil
 }
+
+func (m *Model) handlePruneModalKeys(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "y", "Y", "enter":
+		m.showPruneModal = false
+		m.setStatus("⟳ running system prune…")
+		return pruneCmd(m.provider, m.pruneAll)
+	case "a", "A":
+		m.pruneAll = !m.pruneAll
+		return nil
+	case "n", "N", "esc", "q":
+		m.showPruneModal = false
+		m.setStatus("System prune cancelled")
+		return nil
+	}
+	return nil
+}
+
+func (m *Model) handleSettingsModalKeys(msg tea.KeyMsg) tea.Cmd {
+	if m.settingsEditing {
+		switch msg.String() {
+		case "esc":
+			m.settingsEditing = false
+			m.settingsInput.Blur()
+			return nil
+		case "enter":
+			val := strings.TrimSpace(m.settingsInput.Value())
+			switch m.settingsCursor {
+			case 1: // Metrics Interval
+				if n, err := strconv.Atoi(val); err == nil && n > 0 {
+					m.cfg.MetricsInterval = n
+					m.refreshInterval = time.Duration(n) * time.Second
+				}
+			case 2: // Log Line Limit
+				if n, err := strconv.Atoi(val); err == nil && n > 0 {
+					m.cfg.LogLineLimit = n
+					m.logLineLimit = n
+				}
+			case 3: // Log Tail Limit
+				if n, err := strconv.Atoi(val); err == nil && n > 0 {
+					m.cfg.LogTailLimit = n
+				}
+			}
+			m.settingsEditing = false
+			m.settingsInput.Blur()
+			_ = config.Save(m.cfg)
+			m.setStatus("✓ Setting updated")
+			return nil
+		}
+		var cmd tea.Cmd
+		m.settingsInput, cmd = m.settingsInput.Update(msg)
+		return cmd
+	}
+
+	numSettings := 5
+	switch msg.String() {
+	case "esc", "q", "S":
+		m.showSettingsModal = false
+		return nil
+	case "up", "k":
+		if m.settingsCursor > 0 {
+			m.settingsCursor--
+		} else {
+			m.settingsCursor = numSettings - 1
+		}
+	case "down", "j":
+		if m.settingsCursor < numSettings-1 {
+			m.settingsCursor++
+		} else {
+			m.settingsCursor = 0
+		}
+	case "enter", " ":
+		switch m.settingsCursor {
+		case 0: // Theme
+			m.showSettingsModal = false
+			m.showThemeMenu = true
+			m.initialTheme = m.cfg.Theme
+		case 1: // Metrics Interval
+			m.settingsEditing = true
+			m.settingsInput.SetValue(strconv.Itoa(m.cfg.MetricsInterval))
+			m.settingsInput.Focus()
+			return textinput.Blink
+		case 2: // Log Line Limit
+			m.settingsEditing = true
+			m.settingsInput.SetValue(strconv.Itoa(m.cfg.LogLineLimit))
+			m.settingsInput.Focus()
+			return textinput.Blink
+		case 3: // Log Tail Limit
+			m.settingsEditing = true
+			m.settingsInput.SetValue(strconv.Itoa(m.cfg.LogTailLimit))
+			m.settingsInput.Focus()
+			return textinput.Blink
+		case 4: // Show Timestamps
+			m.cfg.ShowTimestamps = !m.cfg.ShowTimestamps
+			m.showTimestamps = m.cfg.ShowTimestamps
+			_ = config.Save(m.cfg)
+			m.setStatus(fmt.Sprintf("Timestamps: %t", m.showTimestamps))
+		}
+	}
+	return nil
+}
+

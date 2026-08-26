@@ -23,7 +23,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = splashTickCmd()
 		}
 	case tickMsg:
-		cmd = m.loadContainersCmd()
+		cmd = tea.Batch(m.loadContainersCmd(), m.loadStatsCmd())
+	case statsLoadedMsg:
+		cmd = m.handleStatsLoaded(msg)
 	case containersLoadedMsg:
 		cmd = m.handleContainersLoaded(msg)
 	case containerActionDoneMsg:
@@ -32,6 +34,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.handleBatchActionDone(msg)
 	case containerLogsClearedMsg:
 		cmd = m.handleContainerLogsCleared(msg)
+	case pruneDoneMsg:
+		cmd = m.handlePruneDone(msg)
+	case composeActionDoneMsg:
+		cmd = m.handleComposeActionDone(msg)
 	case inspectDoneMsg:
 		cmd = m.handleInspectDone(msg)
 	case execDoneMsg:
@@ -146,7 +152,16 @@ func (m *Model) handleExecDone(msg execDoneMsg) tea.Cmd {
 	} else {
 		m.setStatus("✓ Shell session closed")
 	}
-	return m.loadContainersCmd()
+	return tea.Batch(m.loadContainersCmd(), m.loadStatsCmd())
+}
+
+func (m *Model) handleStatsLoaded(msg statsLoadedMsg) tea.Cmd {
+	if msg.err != nil {
+		return nil
+	}
+	m.ApplyStats(msg.stats)
+	m.refreshListViewport()
+	return nil
 }
 
 func (m *Model) handleContainersLoaded(msg containersLoadedMsg) tea.Cmd {
@@ -204,6 +219,7 @@ func (m *Model) handleActionDone(msg containerActionDoneMsg) tea.Cmd {
 	}
 	return tea.Batch(
 		m.loadContainersCmd(),
+		m.loadStatsCmd(),
 		tea.Tick(800*time.Millisecond, func(time.Time) tea.Msg {
 			return tickMsg(time.Now())
 		}),
@@ -228,6 +244,7 @@ func (m *Model) handleBatchActionDone(msg batchActionDoneMsg) tea.Cmd {
 
 	return tea.Batch(
 		m.loadContainersCmd(),
+		m.loadStatsCmd(),
 		tea.Tick(800*time.Millisecond, func(time.Time) tea.Msg {
 			return tickMsg(time.Now())
 		}),
@@ -285,3 +302,34 @@ func (m *Model) handleLogStreamDone(msg logStreamDoneMsg) {
 		m.stream = nil
 	}
 }
+
+func (m *Model) handlePruneDone(msg pruneDoneMsg) tea.Cmd {
+	if msg.err != nil {
+		m.setStatus(fmt.Sprintf("✗ Prune failed: %s", msg.err))
+	} else {
+		m.setStatus("✓ System prune complete")
+	}
+	return tea.Batch(m.loadContainersCmd(), m.loadStatsCmd())
+}
+
+func (m *Model) handleComposeActionDone(msg composeActionDoneMsg) tea.Cmd {
+	for i, c := range m.containers {
+		if c.ComposeProject == msg.project {
+			m.containers[i].loading = false
+		}
+	}
+	m.refreshListViewport()
+	if msg.err != nil {
+		m.setStatus(fmt.Sprintf("✗ Compose %s for %s failed: %s", msg.action, msg.project, msg.err))
+	} else {
+		m.setStatus(fmt.Sprintf("✓ Compose %s %s", msg.action, msg.project))
+	}
+	return tea.Batch(
+		m.loadContainersCmd(),
+		m.loadStatsCmd(),
+		tea.Tick(800*time.Millisecond, func(time.Time) tea.Msg {
+			return tickMsg(time.Now())
+		}),
+	)
+}
+

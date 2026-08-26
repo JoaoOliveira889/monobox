@@ -44,6 +44,10 @@ func (p *logProvider) Logs(_ context.Context, _ string, tail int, _, timestamps 
 	p.timestamps = timestamps
 	return io.NopCloser(strings.NewReader("")), nil
 }
+func (p *logProvider) SystemPrune(_ bool) (string, error) { return "reclaimed", nil }
+func (p *logProvider) ComposeUp(_ string) error           { return nil }
+func (p *logProvider) ComposeDown(_ string) error         { return nil }
+
 
 func TestClearLogsRequiresConfirmation(t *testing.T) {
 	p := &logProvider{}

@@ -60,9 +60,11 @@ var (
 	ErrorStyle   lipgloss.Style
 	SuccessStyle lipgloss.Style
 	WarningStyle lipgloss.Style
-	SubtleStyle  lipgloss.Style
-	SpinnerStyle lipgloss.Style
-	ValueStyle   lipgloss.Style
+	SubtleStyle    lipgloss.Style
+	SpinnerStyle   lipgloss.Style
+	ValueStyle     lipgloss.Style
+	HighlightStyle lipgloss.Style
+	CursorStyle    lipgloss.Style
 )
 
 var (
@@ -384,5 +386,13 @@ func ApplyTheme(name string) {
 
 	StatusErrorStyle = lipgloss.NewStyle().
 		Foreground(ColorError).
+		Bold(true)
+
+	HighlightStyle = lipgloss.NewStyle().
+		Foreground(ColorHighlight).
+		Bold(true)
+
+	CursorStyle = lipgloss.NewStyle().
+		Foreground(ColorAccent).
 		Bold(true)
 }

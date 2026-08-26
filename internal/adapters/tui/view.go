@@ -34,6 +34,12 @@ func (m *Model) View() string {
 	if m.showHelp {
 		return m.renderHelpOverlay()
 	}
+	if m.showPruneModal {
+		return m.renderCenteredModal(m.renderPruneModal())
+	}
+	if m.showSettingsModal {
+		return m.renderCenteredModal(m.renderSettingsModal())
+	}
 	if m.showThemeMenu {
 		return m.renderCenteredModal(m.renderThemeMenuModal())
 	}
@@ -501,6 +507,87 @@ func (m *Model) renderBatchConfirmation() string {
 	)
 }
 
+func (m *Model) renderPruneModal() string {
+	allBox := "[ ] Remove all unused images (--all)"
+	if m.pruneAll {
+		allBox = "[x] Remove all unused images (--all)"
+	}
+	return lipgloss.JoinVertical(lipgloss.Left,
+		ui.WarningStyle.Render(fmt.Sprintf("⚠️  System Prune (%s)", m.engine)),
+		"",
+		ui.SubtleStyle.Render("Remove all stopped containers, unused networks, and dangling images."),
+		"",
+		ui.HighlightStyle.Render(allBox),
+		"",
+		lipgloss.JoinHorizontal(lipgloss.Center,
+			m.fmtKey("y", "prune now"),
+			"   ",
+			m.fmtKey("a", "toggle --all"),
+			"   ",
+			m.fmtKey("n/esc", "cancel"),
+		),
+	)
+}
+
+func (m *Model) renderSettingsModal() string {
+	title := ui.BrandTitleStyle.Render("SETTINGS") + " " + ui.SubtleStyle.Render("(S/esc to close)")
+
+	type settingItem struct {
+		name  string
+		value string
+		desc  string
+	}
+
+	items := []settingItem{
+		{"Theme", m.cfg.Theme, "Active color palette"},
+		{"Metrics Interval", fmt.Sprintf("%ds", m.cfg.MetricsInterval), "Container resource stats polling rate"},
+		{"Log Line Limit", fmt.Sprintf("%d", m.cfg.LogLineLimit), "Max log lines kept in memory"},
+		{"Log Tail Limit", fmt.Sprintf("%d", m.cfg.LogTailLimit), "Initial log lines to fetch"},
+		{"Show Timestamps", fmt.Sprintf("%t", m.showTimestamps), "Show ISO timestamps on log streams"},
+	}
+
+	var rows []string
+	for i, item := range items {
+		cursor := "  "
+		if i == m.settingsCursor {
+			cursor = ui.CursorStyle.Render("▸ ")
+		}
+
+		val := item.value
+		if m.settingsEditing && i == m.settingsCursor {
+			val = m.settingsInput.View()
+		}
+
+		nameStyle := ui.LabelStyle
+		valStyle := ui.ValueStyle
+		if i == m.settingsCursor {
+			nameStyle = nameStyle.Bold(true)
+			valStyle = valStyle.Bold(true)
+		}
+
+		row := fmt.Sprintf("%s%-18s %-14s %s",
+			cursor,
+			nameStyle.Render(item.name),
+			valStyle.Render(val),
+			ui.SubtleStyle.Render(item.desc),
+		)
+		rows = append(rows, row)
+	}
+
+	footer := ui.SubtleStyle.Render("↑↓/jk: Navigate  •  Enter: Edit/Select  •  Esc: Cancel")
+	if m.settingsEditing {
+		footer = ui.HighlightStyle.Render("Editing value — Enter: Save  •  Esc: Cancel")
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		title,
+		"",
+		strings.Join(rows, "\n"),
+		"",
+		footer,
+	)
+}
+
 func (m *Model) renderInspectModal() string {
 	c := m.selectedContainer()
 	name := "Container"
@@ -598,6 +685,8 @@ func (m *Model) renderHelpMenu(width, height int) string {
 				{key: "↑↓ / jk", action: "Navigate / scroll"},
 				{key: "< > / , .", action: "Resize panel width"},
 				{key: "/", action: "Filter containers"},
+				{key: "S", action: "In-app settings modal"},
+				{key: "P", action: "System prune modal"},
 				{key: "?", action: "Toggle help modal"},
 				{key: "T", action: "Theme menu"},
 				{key: "esc", action: "Back / clear filter"},
@@ -617,12 +706,16 @@ func (m *Model) renderHelpMenu(width, height int) string {
 				{key: "e | x", action: "Exec shell (/bin/sh)"},
 				{key: "i", action: "Inspect JSON"},
 				{key: "o", action: "Open host port"},
+				{key: "y", action: "Copy container ID"},
+				{key: "Y", action: "Copy container info"},
 			},
 		},
 		{
 			title: "COMPOSE STACKS",
 			entries: []helpEntry{
 				{key: "space | enter", action: "Expand / collapse"},
+				{key: "u (group)", action: "Compose Up -d"},
+				{key: "D (group)", action: "Compose Down"},
 				{key: "s (group)", action: "Batch Start / Stop"},
 				{key: "r (group)", action: "Batch Restart"},
 				{key: "d (group)", action: "Batch Remove"},
@@ -638,6 +731,8 @@ func (m *Model) renderHelpMenu(width, height int) string {
 				{key: "t", action: "Toggle timestamps"},
 				{key: "c | ctrl+l", action: "Clear container logs"},
 				{key: "/", action: "Search / filter logs"},
+				{key: "n / N", action: "Next / prev search match"},
+				{key: "!", action: "Cycle severity (ALL/INFO/WARN/ERR)"},
 				{key: "ctrl+r", action: "Toggle Regex search"},
 				{key: "s | ctrl+s", action: "Export logs to file"},
 				{key: "esc", action: "Back to list"},
@@ -649,6 +744,14 @@ func (m *Model) renderHelpMenu(width, height int) string {
 				{key: "↑↓ / jk", action: "Live preview theme"},
 				{key: "enter", action: "Save preference"},
 				{key: "esc | q | T", action: "Cancel / restore"},
+			},
+		},
+		{
+			title: "MODALS (ENV / HEALTH / SETTINGS)",
+			entries: []helpEntry{
+				{key: "m", action: "Toggle secret masking (Env)"},
+				{key: "a", action: "Toggle all unused images (Prune)"},
+				{key: "esc | q", action: "Close modal"},
 			},
 		},
 		{
@@ -770,8 +873,20 @@ func (m *Model) renderEnvModal() string {
 	for _, env := range envList {
 		parts := strings.SplitN(env, "=", 2)
 		if len(parts) == 2 {
-			k := ui.FooterKeyStyle.Render(parts[0])
-			v := ui.ValueStyle.Render(parts[1])
+			key := parts[0]
+			val := parts[1]
+			
+			masked := false
+			if m.envMaskSecrets && isSensitiveKey(key) {
+				val = maskValue(val)
+				masked = true
+			}
+			
+			k := ui.FooterKeyStyle.Render(key)
+			v := ui.ValueStyle.Render(val)
+			if masked {
+				v += " 🔒"
+			}
 			rows = append(rows, fmt.Sprintf("  %-30s = %s", k, v))
 		} else {
 			rows = append(rows, "  "+ui.ValueStyle.Render(env))

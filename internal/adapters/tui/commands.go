@@ -31,6 +31,19 @@ func (m Model) loadContainersCmd() tea.Cmd {
 	}
 }
 
+func (m Model) loadStatsCmd() tea.Cmd {
+	p := m.provider
+	eng := m.engine
+	return func() tea.Msg {
+		stats, err := p.Stats()
+		if err != nil {
+			logging.Error("load stats", "engine", eng, "err", err)
+			return statsLoadedMsg{err: err}
+		}
+		return statsLoadedMsg{stats: stats}
+	}
+}
+
 func (m Model) containerActionCmd(id, action string) tea.Cmd {
 	p := m.provider
 	return func() tea.Msg {
@@ -185,3 +198,23 @@ func clearStatusCmd(id int) tea.Cmd {
 		return clearStatusMsg{id: id}
 	})
 }
+
+func pruneCmd(p domain.ContainerProvider, all bool) tea.Cmd {
+	return func() tea.Msg {
+		out, err := p.SystemPrune(all)
+		return pruneDoneMsg{output: out, err: err}
+	}
+}
+
+func composeCmd(p domain.ContainerProvider, project, action string) tea.Cmd {
+	return func() tea.Msg {
+		var err error
+		if action == "up" {
+			err = p.ComposeUp(project)
+		} else {
+			err = p.ComposeDown(project)
+		}
+		return composeActionDoneMsg{project: project, action: action, err: err}
+	}
+}
+

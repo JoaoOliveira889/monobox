@@ -90,18 +90,41 @@ func (c Container) IsRunning() bool {
 	return c.Status == StatusRunning
 }
 
-type ContainerProvider interface {
-	EngineName() Engine
-	List() ([]Container, error)
-	Stats() (map[string]ContainerStats, error)
-	ClearLogs(id string) error
+type ContainerLifecycleProvider interface {
 	Start(id string) error
 	Stop(id string) error
 	Restart(id string) error
 	Pause(id string) error
 	Unpause(id string) error
 	Remove(id string, force bool) error
+}
+
+type LogProvider interface {
+	ClearLogs(id string) error
+	Logs(ctx context.Context, id string, tail int, follow bool, timestamps bool) (io.ReadCloser, error)
+}
+
+type InspectProvider interface {
 	Inspect(id string) (string, error)
 	ExecCmd(id string) *exec.Cmd
-	Logs(ctx context.Context, id string, tail int, follow bool, timestamps bool) (io.ReadCloser, error)
+}
+
+type SystemProvider interface {
+	SystemPrune(all bool) (string, error)
+}
+
+type ComposeProvider interface {
+	ComposeUp(project string) error
+	ComposeDown(project string) error
+}
+
+type ContainerProvider interface {
+	EngineName() Engine
+	List() ([]Container, error)
+	Stats() (map[string]ContainerStats, error)
+	ContainerLifecycleProvider
+	LogProvider
+	InspectProvider
+	SystemProvider
+	ComposeProvider
 }
