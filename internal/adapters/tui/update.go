@@ -20,7 +20,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case splashTickMsg:
 		if m.showSplash {
 			m.splashFrame++
-			cmd = splashTickCmd()
+			m.maybeHideSplash()
+			if m.showSplash {
+				cmd = splashTickCmd()
+			}
 		}
 	case tickMsg:
 		cmd = tea.Batch(m.loadContainersCmd(), m.loadStatsCmd())
@@ -53,7 +56,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = ""
 		}
 	case tea.KeyMsg:
+		if m.showSplash && m.splashReady {
+			m.showSplash = false
+			return m, nil
+		}
 		cmd = m.handleKeys(msg)
+	case tea.MouseMsg:
+		cmd = m.handleMouse(msg)
 	}
 
 	if m.statusMsg != "" && m.statusMsg != oldStatus {
@@ -70,7 +79,7 @@ func (m *Model) handleResize(msg tea.WindowSizeMsg) tea.Cmd {
 
 	lpW := m.leftPanelWidth()
 	rpW := m.rightPanelWidth()
-	headerHeight := 3
+	headerHeight := 2
 	footerHeight := 1
 	bodyHeight := m.height - headerHeight - footerHeight
 	if bodyHeight < 5 {
@@ -166,13 +175,15 @@ func (m *Model) handleStatsLoaded(msg statsLoadedMsg) tea.Cmd {
 
 func (m *Model) handleContainersLoaded(msg containersLoadedMsg) tea.Cmd {
 	m.loading = false
-	m.showSplash = false
+	m.splashReady = true
+	m.maybeHideSplash()
 
 	if msg.err != nil {
 		m.setStatus(fmt.Sprintf("✗ Error loading containers: %s", msg.err))
 		return m.tickCmd()
 	}
 
+	keepSplash := m.showSplash
 	m.ApplyContainersLoaded(func() []domain.Container {
 		list := make([]domain.Container, len(msg.containers))
 		for i, item := range msg.containers {
@@ -180,6 +191,9 @@ func (m *Model) handleContainersLoaded(msg containersLoadedMsg) tea.Cmd {
 		}
 		return list
 	}())
+	if keepSplash {
+		m.showSplash = true
+	}
 
 	m.refreshListViewport()
 	if m.stream == nil {
@@ -331,5 +345,146 @@ func (m *Model) handleComposeActionDone(msg composeActionDoneMsg) tea.Cmd {
 			return tickMsg(time.Now())
 		}),
 	)
+}
+
+func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
+	if m.showSplash {
+		return nil
+	}
+
+	if msg.Action == tea.MouseActionRelease {
+		return nil
+	}
+
+	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+		now := time.Now()
+		if now.Sub(m.lastWheelTime) < 45*time.Millisecond {
+			return nil
+		}
+		m.lastWheelTime = now
+
+		delta := 1
+		if msg.Button == tea.MouseButtonWheelUp {
+			delta = -1
+		}
+
+		if m.showHelp {
+			if delta < 0 {
+				m.helpViewport.LineUp(1)
+			} else {
+				m.helpViewport.LineDown(1)
+			}
+			return nil
+		}
+
+		if m.showInspect {
+			if delta < 0 {
+				m.inspectViewport.LineUp(1)
+			} else {
+				m.inspectViewport.LineDown(1)
+			}
+			return nil
+		}
+
+		if m.showEnvModal {
+			if delta < 0 {
+				m.envViewport.LineUp(1)
+			} else {
+				m.envViewport.LineDown(1)
+			}
+			return nil
+		}
+
+		if m.showHealthModal {
+			if delta < 0 {
+				m.healthViewport.LineUp(1)
+			} else {
+				m.healthViewport.LineDown(1)
+			}
+			return nil
+		}
+
+		if m.showGraphModal {
+			if delta < 0 {
+				m.graphViewport.LineUp(1)
+			} else {
+				m.graphViewport.LineDown(1)
+			}
+			return nil
+		}
+
+		if m.confirmClearLogs || m.confirmRemove || m.confirmBatchAction != "" || m.confirmPortConflict || m.filtering || m.logSearching {
+			return nil
+		}
+
+		// Mouse positioned over Panel 1 (Containers list)
+		if msg.X < m.leftPanelWidth() {
+			if m.activePanel != ListPanel {
+				m.activePanel = ListPanel
+				m.refreshListViewport()
+			}
+			nodes := m.VisibleTreeNodes()
+			if len(nodes) == 0 {
+				return nil
+			}
+			newCursor := m.cursor + delta
+			if newCursor < 0 {
+				newCursor = 0
+			}
+			if newCursor > len(nodes)-1 {
+				newCursor = len(nodes) - 1
+			}
+			if newCursor != m.cursor {
+				m.cursor = newCursor
+				m.refreshListViewport()
+				return m.selectAndStreamContainerLogs()
+			}
+			return nil
+		}
+
+		// Mouse positioned over right panel (Logs / Details)
+		if m.activePanel == LogsPanel {
+			m.logFollow = false
+			if delta < 0 {
+				m.logViewport.LineUp(1)
+			} else {
+				m.logViewport.LineDown(1)
+			}
+			return nil
+		}
+		m.activePanel = LogsPanel
+		m.logFollow = false
+		if delta < 0 {
+			m.logViewport.LineUp(1)
+		} else {
+			m.logViewport.LineDown(1)
+		}
+		return nil
+	}
+
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+		if m.showHelp || m.showInspect || m.showEnvModal || m.showHealthModal || m.showGraphModal ||
+			m.confirmClearLogs || m.confirmRemove || m.confirmBatchAction != "" || m.confirmPortConflict {
+			return nil
+		}
+		if msg.X < m.leftPanelWidth() {
+			if m.activePanel != ListPanel {
+				m.activePanel = ListPanel
+				m.refreshListViewport()
+			}
+		} else {
+			if m.activePanel != LogsPanel {
+				m.activePanel = LogsPanel
+				m.logFollow = true
+				m.logViewport.GotoBottom()
+				c := m.selectedContainer()
+				if c != nil && m.stream == nil {
+					return m.selectAndStreamContainerLogs()
+				}
+			}
+		}
+	}
+
+	return nil
 }
 

@@ -21,35 +21,34 @@ func (m *Model) renderTitledPanel(width, height int, title, content string, acti
 	}
 
 	border := lipgloss.RoundedBorder()
-	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
-	if active {
-		borderStyle = borderStyle.Bold(true)
-	}
 
 	maxTitleWidth := width - 6
-	if maxTitleWidth < 3 {
-		maxTitleWidth = 3
+	if maxTitleWidth < 5 {
+		maxTitleWidth = 5
 	}
+	truncatedTitle := title
 	titleRunes := []rune(title)
 	if len(titleRunes) > maxTitleWidth {
-		title = string(titleRunes[:maxTitleWidth-1]) + "…"
+		truncatedTitle = string(titleRunes[:maxTitleWidth-3]) + "..."
 	}
+
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
 
 	var titleStyled string
 	if active {
-		titleStyled = lipgloss.NewStyle().Foreground(accent).Bold(true).Render(title)
+		titleStyled = lipgloss.NewStyle().Foreground(accent).Bold(true).Render(truncatedTitle)
 	} else {
-		titleStyled = ui.SubtleStyle.Render(title)
+		titleStyled = ui.SubtleStyle.Render(truncatedTitle)
 	}
 
-	titleLen := lipgloss.Width(title)
-	repeatCount := width - titleLen - 5
+	titleLen := lipgloss.Width(truncatedTitle)
+	repeatCount := width - titleLen - 3
 	if repeatCount < 0 {
 		repeatCount = 0
 	}
 
-	topLine := borderStyle.Render(border.TopLeft) +
-		borderStyle.Render("─[") + titleStyled + borderStyle.Render("]") +
+	topLine := borderStyle.Render(border.TopLeft+"─") +
+		titleStyled +
 		borderStyle.Render(strings.Repeat(border.Top, repeatCount)+border.TopRight)
 
 	innerWidth := width - 2
@@ -76,7 +75,7 @@ func (m *Model) renderTitledPanel(width, height int, title, content string, acti
 	return lipgloss.JoinVertical(lipgloss.Left, topLine, panel)
 }
 
-func (m *Model) renderRepoList(width, height int) string {
+func (m *Model) renderContainerList(width, height int) string {
 	filtered := m.FilteredContainers()
 	content := m.listViewport.View()
 
@@ -99,11 +98,11 @@ func (m *Model) renderRepoList(width, height int) string {
 		content = lipgloss.JoinVertical(lipgloss.Left, "  "+filterView, content)
 	}
 
-	title := "1 Containers"
+	title := "[1] Containers"
 	if m.filterQuery != "" || m.filtering {
-		title = fmt.Sprintf("1 Containers (%d/%d)", len(filtered), len(m.containers))
+		title = fmt.Sprintf("[1] Containers (%d/%d)", len(filtered), len(m.containers))
 	}
-	accent := lipgloss.Color(ui.ColorMono)
+	accent := lipgloss.Color(ui.ColorCyan)
 	return m.renderTitledPanel(width, height, title, content, m.activePanel == ListPanel, accent)
 }
 
@@ -140,7 +139,7 @@ func (m *Model) renderProjectHeaderRow(index int, node TreeNode, maxWidth int) s
 
 	var prefix string
 	if selected {
-		prefix = "▍ "
+		prefix = lipgloss.NewStyle().Foreground(ui.ColorCyan).Bold(true).Render("▶ ")
 	} else {
 		prefix = "  "
 	}
@@ -149,34 +148,22 @@ func (m *Model) renderProjectHeaderRow(index int, node TreeNode, maxWidth int) s
 	if !node.Expanded {
 		toggleIcon = "[+] "
 	}
-	if !selected {
-		toggleIcon = lipgloss.NewStyle().Foreground(ui.ColorBox).Bold(true).Render(toggleIcon)
-	}
+	toggleIcon = lipgloss.NewStyle().Foreground(ui.ColorBox).Bold(true).Render(toggleIcon)
 
 	projName := node.ProjectName
-	if !selected {
+	if selected {
 		projName = lipgloss.NewStyle().Foreground(ui.ColorFg).Bold(true).Render(projName)
+	} else {
+		projName = lipgloss.NewStyle().Foreground(ui.ColorFg).Render(projName)
 	}
 
 	badge := fmt.Sprintf("(%d containers)", node.TotalCount)
 	if node.RunningCount > 0 {
 		badge = fmt.Sprintf("(%d/%d running)", node.RunningCount, node.TotalCount)
 	}
-	if selected {
-		badge = " " + badge
-	} else {
-		badge = ui.SubtleStyle.Render(" " + badge)
-	}
+	badge = ui.SubtleStyle.Render(" " + badge)
 
 	left := prefix + toggleIcon + projName + badge
-	leftWidth := lipgloss.Width(left)
-
-	if leftWidth < maxWidth {
-		padding := strings.Repeat(" ", maxWidth-leftWidth)
-		left += padding
-	} else if leftWidth > maxWidth {
-		left = truncateRunes(left, maxWidth)
-	}
 	if selected {
 		return ui.SelectedItemStyle.Render(left)
 	}
@@ -189,7 +176,7 @@ func (m *Model) renderContainerRow(index int, node TreeNode, maxWidth int) strin
 
 	var prefix string
 	if selected {
-		prefix = "▍ "
+		prefix = lipgloss.NewStyle().Foreground(ui.ColorCyan).Bold(true).Render("▶ ")
 	} else {
 		prefix = "  "
 	}
@@ -201,9 +188,7 @@ func (m *Model) renderContainerRow(index int, node TreeNode, maxWidth int) strin
 		} else {
 			treeBranch = "├─ "
 		}
-		if !selected {
-			treeBranch = ui.SubtleStyle.Render(treeBranch)
-		}
+		treeBranch = ui.SubtleStyle.Render(treeBranch)
 	}
 
 	iconStr, _ := containerIconAndLabel(c.Container)
@@ -212,12 +197,7 @@ func (m *Model) renderContainerRow(index int, node TreeNode, maxWidth int) strin
 	}
 	iconCellWidth := iconWidth
 
-	var statusBadge string
-	if selected {
-		statusBadge = statusBadgeText(c, maxWidth)
-	} else {
-		statusBadge = statusBadgeStyled(c, maxWidth)
-	}
+	statusBadge := statusBadgeStyled(c, maxWidth)
 
 	prefixWidth := lipgloss.Width(prefix)
 	treeWidth := lipgloss.Width(treeBranch)
@@ -236,7 +216,7 @@ func (m *Model) renderContainerRow(index int, node TreeNode, maxWidth int) strin
 
 	var nameStr string
 	if selected {
-		nameStr = name
+		nameStr = lipgloss.NewStyle().Foreground(ui.ColorFg).Bold(true).Render(name)
 	} else {
 		nameStr = lipgloss.NewStyle().Foreground(ui.ColorFg).Render(name)
 	}
@@ -250,13 +230,6 @@ func (m *Model) renderContainerRow(index int, node TreeNode, maxWidth int) strin
 	gap := strings.Repeat(" ", gapLen)
 
 	row := leftContent + gap + statusBadge
-	rowWidth := lipgloss.Width(row)
-	if rowWidth < maxWidth {
-		padding := strings.Repeat(" ", maxWidth-rowWidth)
-		row += padding
-	} else if rowWidth > maxWidth {
-		row = truncateRunes(row, maxWidth)
-	}
 	if selected {
 		return ui.SelectedItemStyle.Render(row)
 	}
@@ -421,7 +394,7 @@ func statusBadgeStyled(c containerItem, maxWidth int) string {
 
 func (m *Model) renderDetailPanel(width, height int) string {
 	if node := m.selectedNode(); node != nil && node.Type == NodeProjectHeader {
-		title := "2 Project Stack — " + node.ProjectName
+		title := "[2] Project Stack — " + node.ProjectName
 		var cardLines []string
 		cardLines = append(cardLines, fmt.Sprintf("  %-12s %s", "PROJECT:", ui.ValueStyle.Render(node.ProjectName)))
 		cardLines = append(cardLines, fmt.Sprintf("  %-12s %s", "TYPE:", ui.ValueStyle.Render("📦 Docker Compose Stack")))
@@ -452,14 +425,14 @@ func (m *Model) renderDetailPanel(width, height int) string {
 		}
 
 		content := strings.Join(cardLines, "\n")
-		accent := lipgloss.Color(ui.ColorBox)
+		accent := lipgloss.Color(ui.ColorHighlight)
 		return m.renderTitledPanel(width, height, title, content, m.activePanel == LogsPanel, accent)
 	}
 
 	c := m.selectedContainer()
 	if c == nil {
 		content := ui.SubtleStyle.Render(" No container selected")
-		return m.renderTitledPanel(width, height, "2 Logs", content, false, lipgloss.Color(ui.ColorBorder))
+		return m.renderTitledPanel(width, height, "[2] Logs", content, false, lipgloss.Color(ui.ColorBorder))
 	}
 
 	var title string
@@ -483,7 +456,7 @@ func (m *Model) renderDetailPanel(width, height int) string {
 			names := []string{"", " [sev: INFO+]", " [sev: WARN+]", " [sev: ERROR]"}
 			severityStatus = names[m.logSeverityFilter]
 		}
-		title = fmt.Sprintf("2 Logs — %s %s%s%s%s", c.Name, followStatus, tsStatus, liveStatus, severityStatus)
+		title = fmt.Sprintf("[2] Logs — %s %s%s%s%s", c.Name, followStatus, tsStatus, liveStatus, severityStatus)
 		vpView := renderViewportWithScrollbar(m.logViewport, true)
 		if len(m.logLines) == 0 {
 			if m.stream != nil {
@@ -518,7 +491,7 @@ func (m *Model) renderDetailPanel(width, height int) string {
 			content = vpView
 		}
 	} else {
-		title = "2 Container — " + c.Name
+		title = "[2] Container — " + c.Name
 
 		var cardLines []string
 		cardLines = append(cardLines, fmt.Sprintf("  %-10s %s", "NAME:", ui.ValueStyle.Render(c.Name)))
@@ -709,7 +682,7 @@ func (m *Model) renderDetailPanel(width, height int) string {
 		content = strings.Join(cardLines, "\n")
 	}
 
-	accent := lipgloss.Color(ui.ColorBox)
+	accent := lipgloss.Color(ui.ColorHighlight)
 	return m.renderTitledPanel(width, height, title, content, m.activePanel == LogsPanel, accent)
 }
 

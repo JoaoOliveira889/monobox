@@ -449,6 +449,40 @@ func (m *Model) handleListKeys(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 
+	case matchesKey(msg, keys.PageUp...):
+		if len(nodes) > 0 {
+			m.cursor -= 5
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
+			m.refreshListViewport()
+			return m.selectAndStreamContainerLogs()
+		}
+
+	case matchesKey(msg, keys.PageDown...):
+		if len(nodes) > 0 {
+			m.cursor += 5
+			if m.cursor > len(nodes)-1 {
+				m.cursor = len(nodes) - 1
+			}
+			m.refreshListViewport()
+			return m.selectAndStreamContainerLogs()
+		}
+
+	case matchesKey(msg, keys.Top...):
+		if len(nodes) > 0 && m.cursor != 0 {
+			m.cursor = 0
+			m.refreshListViewport()
+			return m.selectAndStreamContainerLogs()
+		}
+
+	case matchesKey(msg, keys.End...):
+		if len(nodes) > 0 && m.cursor != len(nodes)-1 {
+			m.cursor = len(nodes) - 1
+			m.refreshListViewport()
+			return m.selectAndStreamContainerLogs()
+		}
+
 	case matchesKey(msg, keys.Up...):
 		if m.cursor > 0 {
 			m.cursor--

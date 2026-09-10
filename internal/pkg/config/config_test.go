@@ -43,10 +43,21 @@ func TestConfigLoadSave(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 
-	// Verify file exists
+	// Verify file exists and permissions
 	expectedPath := filepath.Join(tmpDir, ".config", "monobox", "config.yaml")
-	if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+	info, err := os.Stat(expectedPath)
+	if os.IsNotExist(err) {
 		t.Fatalf("expected config file at %s, but does not exist", expectedPath)
+	}
+	if perm := info.Mode().Perm(); perm != 0600 {
+		t.Errorf("expected config file permissions 0600, got %o", perm)
+	}
+	dirInfo, err := os.Stat(filepath.Dir(expectedPath))
+	if err != nil {
+		t.Fatalf("os.Stat dir error: %v", err)
+	}
+	if perm := dirInfo.Mode().Perm(); perm != 0700 {
+		t.Errorf("expected config dir permissions 0700, got %o", perm)
 	}
 
 	// Reload

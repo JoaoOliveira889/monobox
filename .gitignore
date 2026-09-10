@@ -54,3 +54,6 @@ coverage.html
 *.log
 *.log.old
 *.tmp
+
+# AI assistant
+CLAUDE.md

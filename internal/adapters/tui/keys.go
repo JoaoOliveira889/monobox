@@ -15,6 +15,7 @@ type keyMap struct {
 	PageUp      []string
 	PageDown    []string
 	End         []string
+	Top         []string
 	Help        []string
 	Panel1      []string
 	Panel2      []string
@@ -58,7 +59,8 @@ var keys = keyMap{
 	PageUp:           []string{"pgup", "ctrl+u"},
 	PageDown:         []string{"pgdown", "ctrl+d"},
 	End:              []string{"end", "G"},
-	Help:             []string{"?"},
+	Top:              []string{"g", "home"},
+	Help:             []string{"?", "ctrl+p"},
 	Panel1:           []string{"1", "h", "left"},
 	Panel2:           []string{"2", "l", "right"},
 	Tab:              []string{"tab"},

@@ -40,8 +40,6 @@ func (p *PodmanProvider) ClearLogs(id string) error {
 	return clearLogFile(logPath)
 }
 
-
-
 func runCmd(binary string, args ...string) error {
 	out, err := exec.Command(binary, args...).CombinedOutput()
 	if err != nil {

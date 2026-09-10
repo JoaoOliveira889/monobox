@@ -322,7 +322,6 @@ func ApplyTheme(name string) {
 		Bold(true)
 
 	SelectedItemStyle = lipgloss.NewStyle().
-		Background(ColorSelected).
 		Foreground(ColorFg).
 		Bold(true)
 
@@ -330,7 +329,7 @@ func ApplyTheme(name string) {
 		Foreground(ColorFg)
 
 	PointerStyle = lipgloss.NewStyle().
-		Foreground(ColorAccent).
+		Foreground(ColorCyan).
 		Bold(true)
 
 	RunningStyle = lipgloss.NewStyle().

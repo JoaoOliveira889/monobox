@@ -80,57 +80,6 @@ func (m *Model) View() string {
 		Render(view)
 }
 
-func (m *Model) renderSplash() string {
-	barWidth := 20
-	filled := (m.splashFrame * 2) % (barWidth + 1)
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
-	progressBar := ui.SpinnerStyle.Render(bar)
-
-	scanStatus := ui.SpinnerStyle.Render(splashDots(m.splashFrame) + " detecting engine…")
-	version := ui.SubtleStyle.Render("v" + Version)
-	subtitle := ui.SubtleStyle.Render("Docker & Podman container manager")
-
-	body := lipgloss.JoinVertical(lipgloss.Center,
-		renderBrandWordmark(false),
-		"",
-		subtitle,
-		"",
-		progressBar,
-		"",
-		scanStatus,
-		"",
-		version,
-	)
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, body)
-}
-
-func splashDots(frame int) string {
-	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	return frames[frame%len(frames)]
-}
-
-func renderBrandWordmark(compact bool) string {
-	mono := ui.BrandMonoStyle
-	box := ui.BrandBoxStyle
-	subtle := ui.SubtleStyle
-
-	if compact {
-		return lipgloss.JoinHorizontal(lipgloss.Bottom,
-			mono.Render("Mono"),
-			box.Render("Box"),
-		)
-	}
-
-	return lipgloss.JoinVertical(lipgloss.Center,
-		lipgloss.JoinHorizontal(lipgloss.Top,
-			mono.Render("Mono"),
-			box.Render("Box"),
-		),
-		subtle.Render("container dashboard"),
-	)
-}
-
 func (m *Model) renderHeader() string {
 	var brand string
 	switch {
@@ -142,78 +91,83 @@ func (m *Model) renderHeader() string {
 
 	engine := strings.ToLower(strings.TrimSpace(m.engine))
 	if engine == "" {
-		engine = "container engine"
-	}
-	engineLabel := ""
-	if m.width >= 48 {
-		engineLabel = ui.SubtleStyle.Render(engine)
+		engine = "docker"
 	}
 
-	loading := ""
+	summary := m.renderHeaderStatsSummary()
+	sep := ui.SubtleStyle.Render(" │ ")
+
+	leftHeader := " " + brand
+	if m.width >= 45 && engine != "" {
+		leftHeader += sep + ui.SubtleStyle.Render(engine)
+	}
+	if summary != "" {
+		leftHeader += sep + summary
+	}
 	if m.loading {
-		if m.width >= 40 {
-			loading = ui.SpinnerStyle.Render(m.spinnerView() + " Loading...")
+		if m.width >= 60 {
+			leftHeader += "  " + ui.SpinnerStyle.Render(m.spinnerView()+" loading…")
 		} else {
-			loading = ui.SpinnerStyle.Render(m.spinnerView())
+			leftHeader += "  " + ui.SpinnerStyle.Render(m.spinnerView())
 		}
 	}
 
-	brandW := lipgloss.Width(brand)
-	engineW := lipgloss.Width(engineLabel)
-	loadingW := lipgloss.Width(loading)
-
-	maxW := m.width - 1
-	if maxW < 10 {
-		maxW = 10
+	rightHeader := ""
+	if m.statusMsg != "" {
+		rightHeader = m.renderHeaderStatusBar() + " "
 	}
 
-	spacerLen := maxW - brandW - engineW - loadingW - 4
-	if spacerLen < 0 {
-		spacerLen = 0
-	}
-	spacer := strings.Repeat(" ", spacerLen)
-
-	headerLine := " " + lipgloss.JoinHorizontal(lipgloss.Bottom,
-		brand,
-		"  ",
-		engineLabel,
-		spacer,
-		loading,
-	) + " "
-
-	if lipgloss.Width(headerLine) > maxW {
-		headerLine = truncateRunes(headerLine, maxW)
-	}
-
+	headerLine := renderHeaderBetween(leftHeader, rightHeader, m.width)
 	border := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(ui.ColorBorder)).
-		Render(strings.Repeat("─", maxW))
+		Render(strings.Repeat("─", m.width))
 
-	styledStatus := m.renderHeaderStatusBar()
+	return headerLine + "\n" + border
+}
 
-	return headerLine + "\n" + styledStatus + "\n" + border
+func renderHeaderBetween(left, right string, totalWidth int) string {
+	leftW := lipgloss.Width(left)
+	rightW := lipgloss.Width(right)
+	if right == "" {
+		return left
+	}
+	spaces := totalWidth - leftW - rightW
+	if spaces < 2 {
+		maxRightW := totalWidth - leftW - 2
+		if maxRightW > 6 {
+			right = truncateRunes(right, maxRightW)
+			rightW = lipgloss.Width(right)
+			spaces = totalWidth - leftW - rightW
+		} else {
+			return left
+		}
+	}
+	return left + strings.Repeat(" ", spaces) + right
 }
 
 func (m *Model) renderHeaderStatusBar() string {
-	maxW := m.width - 1
-	if maxW < 10 {
-		maxW = 10
+	if m.statusMsg == "" {
+		return ""
 	}
-
-	if m.statusMsg != "" {
-		msg := " " + m.statusMsg
-		switch {
-		case strings.HasPrefix(m.statusMsg, "✓"):
-			return ui.StatusSuccessStyle.MaxWidth(maxW).Render(msg)
-		case strings.HasPrefix(m.statusMsg, "✗"):
-			return ui.StatusErrorStyle.MaxWidth(maxW).Render(msg)
-		default:
-			return ui.StatusInfoStyle.MaxWidth(maxW).Render(msg)
-		}
+	msg := m.statusMsg
+	switch {
+	case strings.HasPrefix(m.statusMsg, "✓"):
+		return ui.StatusSuccessStyle.Render(msg)
+	case strings.HasPrefix(m.statusMsg, "✗") || strings.HasPrefix(m.statusMsg, "Error"):
+		return ui.StatusErrorStyle.Render(msg)
+	case strings.HasPrefix(m.statusMsg, "⚠") || strings.HasPrefix(m.statusMsg, "Warn"):
+		return ui.StatusWarningStyle.Render(msg)
+	default:
+		return ui.StatusInfoStyle.Render(msg)
 	}
+}
 
-	var parts []string
+func (m *Model) renderHeaderStatsSummary() string {
 	total := len(m.containers)
+	if total == 0 {
+		return ui.SubtleStyle.Render("● No containers")
+	}
+
 	running, stopped := 0, 0
 	highLoadCount := 0
 	var totalCPU float64
@@ -233,27 +187,36 @@ func (m *Model) renderHeaderStatusBar() string {
 		}
 	}
 
-	if total > 0 {
-		parts = append(parts, ui.ValueStyle.Render(fmt.Sprintf("%d containers", total)))
-		parts = append(parts, ui.RunningStyle.Render(fmt.Sprintf("%d running", running)))
-		if stopped > 0 {
-			parts = append(parts, ui.StoppedStyle.Render(fmt.Sprintf("%d stopped", stopped)))
-		}
-		if highLoadCount > 0 {
-			parts = append(parts, ui.WarningStyle.Render(fmt.Sprintf("⚡ %d high load", highLoadCount)))
-		}
-		if running > 0 {
-			parts = append(parts, lipgloss.NewStyle().Foreground(ui.ColorHighlight).Bold(true).Render(fmt.Sprintf("%.2f%% CPU", totalCPU)))
-			parts = append(parts, lipgloss.NewStyle().Foreground(ui.ColorCyan).Bold(true).Render(formatBytes(totalMemBytes)))
-		}
-	} else if !m.loading {
-		parts = append(parts, "No containers found")
+	var parts []string
+	filtered := len(m.FilteredContainers())
+	dot := ui.SubtleStyle.Render("●")
+
+	if m.filterQuery != "" || m.filtering {
+		parts = append(parts, fmt.Sprintf("%s %d/%d containers", dot, filtered, total))
+	} else {
+		parts = append(parts, fmt.Sprintf("%s %d containers", dot, total))
 	}
 
-	sep := ui.SubtleStyle.Render("  ·  ")
-	barText := " " + fitInlineParts(parts, sep, maxW-2)
+	if running > 0 {
+		parts = append(parts, ui.RunningStyle.Render(fmt.Sprintf("%d running", running)))
+	}
+	if stopped > 0 {
+		parts = append(parts, ui.StoppedStyle.Render(fmt.Sprintf("%d stopped", stopped)))
+	}
+	if highLoadCount > 0 {
+		parts = append(parts, ui.WarningStyle.Render(fmt.Sprintf("⚡ %d high load", highLoadCount)))
+	}
+	if running > 0 {
+		parts = append(parts, lipgloss.NewStyle().Foreground(ui.ColorHighlight).Bold(true).Render(fmt.Sprintf("%.2f%% CPU", totalCPU)))
+		parts = append(parts, lipgloss.NewStyle().Foreground(ui.ColorCyan).Bold(true).Render(formatBytes(totalMemBytes)))
+	}
 
-	return ui.SubtleStyle.MaxWidth(maxW).Render(barText)
+	sep := ui.SubtleStyle.Render(" · ")
+	maxW := m.width - 1
+	if maxW < 10 {
+		maxW = 10
+	}
+	return fitInlineParts(parts, sep, maxW)
 }
 
 func fitInlineParts(parts []string, separator string, maxWidth int) string {
@@ -345,48 +308,40 @@ func formatBytes(bytes float64) string {
 }
 
 func (m *Model) renderFooter() string {
-	sep := ui.SubtleStyle.Render(" • ")
+	sep := ui.SubtleStyle.Render(" · ")
 	var parts []string
 
 	if m.filtering {
 		parts = []string{
-			m.fmtKey("?", "help"),
-			m.fmtKey("esc", "clear filter"),
-			m.fmtKey("enter", "done"),
-			m.fmtKey("↑↓", "nav"),
+			m.fmtKey("esc", "clear"),
+			m.fmtKey("enter", "apply"),
+			m.fmtKey("↑↓/jk", "nav"),
 		}
 	} else if m.logSearching {
 		parts = []string{
-			m.fmtKey("?", "help"),
-			m.fmtKey("esc", "clear search"),
+			m.fmtKey("esc", "clear"),
 			m.fmtKey("enter", "done"),
+			m.fmtKey("n/N", "next/prev"),
 		}
 	} else if m.activePanel == LogsPanel {
 		followAction := "follow:ON"
 		if !m.logFollow {
 			followAction = "follow:OFF"
 		}
-		tsAction := "ts:OFF"
-		if m.showTimestamps {
-			tsAction = "ts:ON"
-		}
 		parts = []string{
-			m.fmtKey("↑↓/jk", "scroll"),
-			m.fmtKey("?", "help"),
+			m.fmtKey("jk", "scroll"),
+			m.fmtKey("ctrl+d/u", "page"),
 			m.fmtKey("/", "search"),
 			m.fmtKey("f", followAction),
-			m.fmtKey("t", tsAction),
-			m.fmtKey("s/ctrl+s", "export"),
-			m.fmtKey("<>", "resize"),
 			m.fmtKey("c", "clear"),
-			m.fmtKey("esc", "back"),
+			m.fmtKey("1/esc", "back"),
 			m.fmtKey("q", "quit"),
 		}
 	} else if node := m.selectedNode(); node != nil && node.Type == NodeProjectHeader {
 		parts = []string{
-			m.fmtKey("↑↓/jk", "nav"),
-			m.fmtKey("?", "help"),
-			m.fmtKey("space/enter", "toggle group"),
+			m.fmtKey("jk", "nav"),
+			m.fmtKey("ctrl+d/u", "page"),
+			m.fmtKey("space/enter", "toggle"),
 			m.fmtKey("s", "batch start/stop"),
 			m.fmtKey("r", "batch restart"),
 			m.fmtKey("d", "batch remove"),
@@ -395,12 +350,12 @@ func (m *Model) renderFooter() string {
 		}
 	} else {
 		parts = []string{
-			m.fmtKey("↑↓/jk", "nav"),
-			m.fmtKey("/", "filter"),
-			m.fmtKey("enter", "logs"),
+			m.fmtKey("jk", "nav"),
+			m.fmtKey("ctrl+d/u", "page"),
+			m.fmtKey("enter/2", "logs"),
 			m.fmtKey("s", "start/stop"),
 			m.fmtKey("r", "restart"),
-			m.fmtKey("?", "shortcuts"),
+			m.fmtKey("/", "filter"),
 			m.fmtKey("q", "quit"),
 		}
 	}
@@ -410,6 +365,8 @@ func (m *Model) renderFooter() string {
 
 func (m *Model) renderResponsiveFooter(parts []string, sep string) string {
 	version := ui.SubtleStyle.Render(fmt.Sprintf("monobox %s", Version))
+	help := m.fmtKey("?", "help")
+	fixedRight := help + "  " + version
 
 	contentWidth := m.width - 2
 	if contentWidth < 10 {
@@ -417,7 +374,7 @@ func (m *Model) renderResponsiveFooter(parts []string, sep string) string {
 	}
 
 	rendered := strings.Join(parts, sep)
-	maxLeftWidth := contentWidth - lipgloss.Width(version) - 1
+	maxLeftWidth := contentWidth - lipgloss.Width(fixedRight) - 1
 
 	for len(parts) > 0 && lipgloss.Width(rendered) > maxLeftWidth {
 		parts = parts[:len(parts)-1]
@@ -425,13 +382,13 @@ func (m *Model) renderResponsiveFooter(parts []string, sep string) string {
 	}
 
 	left := rendered
-	spacerLen := contentWidth - lipgloss.Width(left) - lipgloss.Width(version)
+	spacerLen := contentWidth - lipgloss.Width(left) - lipgloss.Width(fixedRight)
 	if spacerLen < 0 {
 		spacerLen = 0
 	}
 	spacer := strings.Repeat(" ", spacerLen)
 
-	footerText := " " + left + spacer + version
+	footerText := " " + left + spacer + fixedRight
 	if footerWidth := lipgloss.Width(footerText); footerWidth < contentWidth+1 {
 		footerText += strings.Repeat(" ", contentWidth+1-footerWidth)
 	}
@@ -449,7 +406,7 @@ func (m *Model) renderBody() string {
 	leftWidth := m.leftPanelWidth()
 	rightWidth := m.rightPanelWidth()
 
-	left := m.renderRepoList(leftWidth, bodyHeight)
+	left := m.renderContainerList(leftWidth, bodyHeight)
 	right := m.renderDetailPanel(rightWidth, bodyHeight)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
@@ -617,16 +574,26 @@ func (m *Model) clampModalSize(marginW, maxW, marginH, maxH int) (int, int) {
 	return w, h
 }
 
-func (m *Model) renderHelpOverlay() string {
-	panelWidth, panelHeight := m.clampModalSize(4, 90, 2, 26)
-
-	innerWidth := panelWidth - 6
-	if innerWidth < 64 {
-		innerWidth = 64
+func padRight(s string, width int) string {
+	w := lipgloss.Width(s)
+	if w >= width {
+		return s
 	}
-	innerHeight := panelHeight - 6
-	if innerHeight < 12 {
-		innerHeight = 12
+	return s + strings.Repeat(" ", width-w)
+}
+
+func (m *Model) renderHelpOverlay() string {
+	modalOuterWidth := m.width - 4
+	if modalOuterWidth > 120 {
+		modalOuterWidth = 120
+	}
+	if modalOuterWidth < 40 {
+		modalOuterWidth = 40
+	}
+
+	innerWidth := modalOuterWidth - 6
+	if innerWidth < 30 {
+		innerWidth = 30
 	}
 
 	title := lipgloss.JoinHorizontal(lipgloss.Bottom,
@@ -635,33 +602,58 @@ func (m *Model) renderHelpOverlay() string {
 		ui.BrandTitleStyle.Render("SHORTCUTS"),
 	)
 
-	vpHeight := innerHeight - 3
-	if vpHeight < 5 {
-		vpHeight = 5
+	maxViewportHeight := m.height - 8
+	if maxViewportHeight < 6 {
+		maxViewportHeight = 6
 	}
-	if m.helpViewport.Width != innerWidth-1 || m.helpViewport.Height != vpHeight {
-		m.helpViewport = viewport.New(innerWidth-1, vpHeight)
+	vpHeight := maxViewportHeight
+	vpWidth := innerWidth - 2
+	if vpWidth < 20 {
+		vpWidth = 20
+	}
+
+	if m.helpViewport.Width != vpWidth || m.helpViewport.Height != vpHeight {
+		m.helpViewport = viewport.New(vpWidth, vpHeight)
 	} else {
-		m.helpViewport.Width = innerWidth - 1
+		m.helpViewport.Width = vpWidth
 		m.helpViewport.Height = vpHeight
 	}
 
-	body := m.renderHelpMenu(innerWidth-1, 999)
+	body := m.renderHelpMenu(vpWidth, vpHeight)
+	contentHeight := lipgloss.Height(body)
+	if contentHeight < vpHeight {
+		vpHeight = contentHeight
+		if vpHeight < 5 {
+			vpHeight = 5
+		}
+		m.helpViewport.Height = vpHeight
+	}
 	m.helpViewport.SetContent(body)
 
+	titleBar := lipgloss.NewStyle().Align(lipgloss.Center).Width(innerWidth).Render(title)
+	footerHint := lipgloss.NewStyle().Align(lipgloss.Center).Width(innerWidth).Render(
+		ui.SubtleStyle.Render("esc / ? close  •  ↑/↓ / jk scroll  •  g / G top / bottom"),
+	)
+
+	var helpBody string
+	if contentHeight <= vpHeight {
+		helpBody = m.helpViewport.View()
+	} else {
+		helpBody = renderViewportWithScrollbar(m.helpViewport, true)
+	}
+
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Align(lipgloss.Center).Width(innerWidth).Render(title),
+		titleBar,
 		"",
-		renderViewportWithScrollbar(m.helpViewport, true),
+		helpBody,
 		"",
-		lipgloss.NewStyle().Align(lipgloss.Center).Width(innerWidth).Render(ui.SubtleStyle.Render("Press ESC, q or ? to close")),
+		footerHint,
 	)
 
 	panelStyle := ui.ActivePanelStyle.
-		BorderStyle(lipgloss.DoubleBorder()).
-		BorderForeground(lipgloss.Color(ui.ColorHighlight)).
-		Width(panelWidth).
-		Height(panelHeight).
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(ui.ColorCyan)).
+		Width(innerWidth).
 		Padding(1, 2)
 
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panelStyle.Render(content))
@@ -673,128 +665,226 @@ func (m *Model) renderHelpMenu(width, height int) string {
 		action string
 	}
 	type helpSection struct {
-		title   string
+		heading string
 		entries []helpEntry
 	}
+	type helpColumn struct {
+		sections []helpSection
+	}
 
-	sections := []helpSection{
-		{
-			title: "NAVIGATION & PANELS",
-			entries: []helpEntry{
-				{key: "1 | 2 | tab", action: "Switch panels"},
-				{key: "↑↓ / jk", action: "Navigate / scroll"},
-				{key: "< > / , .", action: "Resize panel width"},
-				{key: "/", action: "Filter containers"},
-				{key: "S", action: "In-app settings modal"},
-				{key: "P", action: "System prune modal"},
-				{key: "?", action: "Toggle help modal"},
-				{key: "T", action: "Theme menu"},
-				{key: "esc", action: "Back / clear filter"},
-				{key: "q | ctrl+c", action: "Quit Monobox"},
-			},
-		},
-		{
-			title: "CONTAINER ACTIONS",
-			entries: []helpEntry{
-				{key: "s", action: "Start / Stop"},
-				{key: "r", action: "Restart container"},
-				{key: "p", action: "Pause / Unpause"},
-				{key: "g", action: "Historical Metrics Graph"},
-				{key: "E", action: "Environment Variables"},
-				{key: "H", action: "Healthcheck Probe Logs"},
-				{key: "d | delete", action: "Remove container"},
-				{key: "e | x", action: "Exec shell (/bin/sh)"},
-				{key: "i", action: "Inspect JSON"},
-				{key: "o", action: "Open host port"},
-				{key: "y", action: "Copy container ID"},
-				{key: "Y", action: "Copy container info"},
-			},
-		},
-		{
-			title: "COMPOSE STACKS",
-			entries: []helpEntry{
-				{key: "space | enter", action: "Expand / collapse"},
-				{key: "u (group)", action: "Compose Up -d"},
-				{key: "D (group)", action: "Compose Down"},
-				{key: "s (group)", action: "Batch Start / Stop"},
-				{key: "r (group)", action: "Batch Restart"},
-				{key: "d (group)", action: "Batch Remove"},
-			},
-		},
-		{
-			title: "LOGS VIEW",
-			entries: []helpEntry{
-				{key: "↑↓ / jk", action: "Scroll log history"},
-				{key: "pgup | pgdn", action: "Page up / down"},
-				{key: "end | G", action: "Jump to bottom"},
-				{key: "f", action: "Toggle live follow"},
-				{key: "t", action: "Toggle timestamps"},
-				{key: "c | ctrl+l", action: "Clear container logs"},
-				{key: "/", action: "Search / filter logs"},
-				{key: "n / N", action: "Next / prev search match"},
-				{key: "!", action: "Cycle severity (ALL/INFO/WARN/ERR)"},
-				{key: "ctrl+r", action: "Toggle Regex search"},
-				{key: "s | ctrl+s", action: "Export logs to file"},
-				{key: "esc", action: "Back to list"},
-			},
-		},
-		{
-			title: "THEME MENU",
-			entries: []helpEntry{
-				{key: "↑↓ / jk", action: "Live preview theme"},
-				{key: "enter", action: "Save preference"},
-				{key: "esc | q | T", action: "Cancel / restore"},
-			},
-		},
-		{
-			title: "MODALS (ENV / HEALTH / SETTINGS)",
-			entries: []helpEntry{
-				{key: "m", action: "Toggle secret masking (Env)"},
-				{key: "a", action: "Toggle all unused images (Prune)"},
-				{key: "esc | q", action: "Close modal"},
-			},
-		},
-		{
-			title: "CONFIRMATION MODALS",
-			entries: []helpEntry{
-				{key: "y | Y", action: "Confirm action"},
-				{key: "n | N | esc", action: "Cancel action"},
-			},
+	secNav := helpSection{
+		heading: "CURSOR & PANELS",
+		entries: []helpEntry{
+			{key: "jk | ↑↓", action: "Move cursor / scroll"},
+			{key: "ctrl+d/u", action: "Half-page scroll"},
+			{key: "g | G", action: "Jump top / bottom"},
+			{key: "1 | 2 | tab", action: "Switch panels"},
+			{key: "hl | ←→", action: "Focus / toggle group"},
+			{key: "< | >", action: "Resize panel ratio"},
 		},
 	}
 
-	colWidth := (width - 4) / 2
-	if colWidth < 30 {
-		colWidth = 30
+	secActions := helpSection{
+		heading: "CONTAINER ACTIONS",
+		entries: []helpEntry{
+			{key: "s", action: "Start / Stop"},
+			{key: "r", action: "Restart container"},
+			{key: "p", action: "Pause / Unpause"},
+			{key: "d | delete", action: "Remove container"},
+			{key: "e | x", action: "Exec shell (/bin/sh)"},
+			{key: "i", action: "Inspect JSON"},
+			{key: "o", action: "Open host port URL"},
+			{key: "g", action: "Metrics graph"},
+			{key: "E | H", action: "Env vars / health logs"},
+			{key: "y | Y", action: "Copy ID / info"},
+		},
 	}
 
-	var col1Blocks []string
-	var col2Blocks []string
+	secStacks := helpSection{
+		heading: "COMPOSE STACKS",
+		entries: []helpEntry{
+			{key: "space | enter", action: "Expand / collapse"},
+			{key: "u", action: "Compose Up -d"},
+			{key: "D", action: "Compose Down"},
+			{key: "s (group)", action: "Batch Start / Stop"},
+			{key: "r (group)", action: "Batch Restart"},
+			{key: "d (group)", action: "Batch Remove"},
+		},
+	}
 
-	for i, sec := range sections {
-		var lines []string
-		lines = append(lines, ui.LabelStyle.Bold(true).Render(sec.title))
-		for _, e := range sec.entries {
-			kStyled := ui.FooterKeyStyle.Width(14).Render(e.key)
-			dStyled := ui.SubtleStyle.Render(e.action)
-			lines = append(lines, " "+kStyled+" "+dStyled)
+	secLogs := helpSection{
+		heading: "LOGS & SEARCH",
+		entries: []helpEntry{
+			{key: "f", action: "Toggle live follow"},
+			{key: "t", action: "Toggle timestamps"},
+			{key: "c | ctrl+l", action: "Clear container logs"},
+			{key: "/", action: "Search / filter"},
+			{key: "n | N", action: "Next / prev match"},
+			{key: "!", action: "Cycle severity filter"},
+			{key: "ctrl+r", action: "Toggle regex search"},
+			{key: "s | ctrl+s", action: "Export logs to file"},
+		},
+	}
+
+	secSystem := helpSection{
+		heading: "SYSTEM & MODALS",
+		entries: []helpEntry{
+			{key: "S", action: "Settings modal"},
+			{key: "P", action: "System prune modal"},
+			{key: "T", action: "Theme menu"},
+			{key: "m", action: "Mask secrets (Env)"},
+			{key: "? | ctrl+p", action: "Toggle shortcuts help"},
+			{key: "esc", action: "Back / cancel modal"},
+			{key: "q | ctrl+c", action: "Quit MonoBox"},
+		},
+	}
+
+	var colDefs []helpColumn
+	var sep string
+	var sepWidth int
+
+	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorBorder))
+
+	if width >= 95 {
+		colDefs = []helpColumn{
+			{sections: []helpSection{secNav, secSystem}},
+			{sections: []helpSection{secActions}},
+			{sections: []helpSection{secStacks, secLogs}},
 		}
-		block := strings.Join(lines, "\n")
-		if i%2 == 0 {
-			col1Blocks = append(col1Blocks, block)
+		sep = "  " + sepStyle.Render("│") + "  "
+		sepWidth = 5
+	} else if width >= 60 {
+		colDefs = []helpColumn{
+			{sections: []helpSection{secNav, secActions, secSystem}},
+			{sections: []helpSection{secStacks, secLogs}},
+		}
+		sep = " " + sepStyle.Render("│") + " "
+		sepWidth = 3
+	} else {
+		colDefs = []helpColumn{
+			{sections: []helpSection{secNav, secActions, secStacks, secLogs, secSystem}},
+		}
+		sep = ""
+		sepWidth = 0
+	}
+
+	numCols := len(colDefs)
+	totalSepWidth := (numCols - 1) * sepWidth
+	availableWidth := width - totalSepWidth
+	if availableWidth < numCols {
+		availableWidth = numCols
+	}
+	baseColWidth := availableWidth / numCols
+	remainder := availableWidth % numCols
+
+	colWidths := make([]int, numCols)
+	for i := 0; i < numCols; i++ {
+		colWidths[i] = baseColWidth
+		if i == numCols-1 {
+			colWidths[i] += remainder
+		}
+	}
+
+	headingStyle := lipgloss.NewStyle().Foreground(ui.ColorCyan).Bold(true)
+	dividerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.ColorBorder))
+	keyStyle := ui.FooterKeyStyle
+	actStyle := ui.ValueStyle
+
+	renderedColumns := make([][]string, numCols)
+
+	for colIdx, col := range colDefs {
+		cWidth := colWidths[colIdx]
+
+		maxKey := 0
+		for _, sec := range col.sections {
+			for _, e := range sec.entries {
+				if w := lipgloss.Width(e.key); w > maxKey {
+					maxKey = w
+				}
+			}
+		}
+		if maxKey < 6 {
+			maxKey = 6
+		}
+		if maxKey > 14 {
+			maxKey = 14
+		}
+		if maxKey > cWidth-4 && cWidth > 4 {
+			maxKey = cWidth - 4
+		}
+
+		keyColW := maxKey
+		actColW := cWidth - keyColW - 2
+		if actColW < 1 {
+			actColW = 1
+		}
+
+		var colLines []string
+		for secIdx, sec := range col.sections {
+			if secIdx > 0 {
+				colLines = append(colLines, strings.Repeat(" ", cWidth))
+			}
+
+			titleStr := sec.heading
+			if lipgloss.Width(titleStr) > cWidth {
+				titleStr = truncateRunes(titleStr, cWidth)
+			}
+			titleRendered := headingStyle.Render(titleStr)
+			if pad := cWidth - lipgloss.Width(titleRendered); pad > 0 {
+				titleRendered += strings.Repeat(" ", pad)
+			}
+			colLines = append(colLines, titleRendered)
+
+			divLine := ""
+			if cWidth > 0 {
+				divLine = dividerStyle.Render(strings.Repeat("─", cWidth))
+			}
+			colLines = append(colLines, divLine)
+
+			for _, e := range sec.entries {
+				kPadded := padRight(e.key, keyColW)
+				actPadded := padRight(e.action, actColW)
+				if lipgloss.Width(e.action) > actColW {
+					actPadded = truncateRunes(e.action, actColW)
+				}
+				row := keyStyle.Render(kPadded) + "  " + actStyle.Render(actPadded)
+				if pad := cWidth - lipgloss.Width(row); pad > 0 {
+					row += strings.Repeat(" ", pad)
+				}
+				colLines = append(colLines, row)
+			}
+		}
+		renderedColumns[colIdx] = colLines
+	}
+
+	maxLines := 0
+	for _, lines := range renderedColumns {
+		if len(lines) > maxLines {
+			maxLines = len(lines)
+		}
+	}
+
+	for colIdx := 0; colIdx < numCols; colIdx++ {
+		cWidth := colWidths[colIdx]
+		for len(renderedColumns[colIdx]) < maxLines {
+			renderedColumns[colIdx] = append(renderedColumns[colIdx], strings.Repeat(" ", cWidth))
+		}
+	}
+
+	finalLines := make([]string, maxLines)
+	for lineIdx := 0; lineIdx < maxLines; lineIdx++ {
+		if numCols == 1 {
+			finalLines[lineIdx] = renderedColumns[0][lineIdx]
 		} else {
-			col2Blocks = append(col2Blocks, block)
+			parts := make([]string, numCols)
+			for colIdx := 0; colIdx < numCols; colIdx++ {
+				parts[colIdx] = renderedColumns[colIdx][lineIdx]
+			}
+			finalLines[lineIdx] = strings.Join(parts, sep)
 		}
 	}
 
-	col1 := strings.Join(col1Blocks, "\n\n")
-	col2 := strings.Join(col2Blocks, "\n\n")
-
-	return lipgloss.JoinHorizontal(lipgloss.Top,
-		lipgloss.NewStyle().Width(colWidth).Render(col1),
-		"  ",
-		lipgloss.NewStyle().Width(colWidth).Render(col2),
-	)
+	return strings.Join(finalLines, "\n")
 }
 
 func (m *Model) renderThemeMenuModal() string {

@@ -78,25 +78,6 @@ func engineStats(binary string) (map[string]domain.ContainerStats, error) {
 	return res, nil
 }
 
-func applyStats(containers []domain.Container, statsMap map[string]domain.ContainerStats) {
-	for i, c := range containers {
-		var st domain.ContainerStats
-		var ok bool
-		if st, ok = statsMap[c.ID]; !ok {
-			st, ok = statsMap[c.Name]
-		}
-		if !ok {
-			continue
-		}
-		containers[i].CPU = st.CPU
-		if st.MemPerc != "" {
-			containers[i].Mem = fmt.Sprintf("%s (%s)", st.Mem, st.MemPerc)
-		} else {
-			containers[i].Mem = st.Mem
-		}
-	}
-}
-
 func (d *DockerProvider) ClearLogs(id string) error {
 	out, err := exec.Command("docker", "inspect", "--format", "{{.LogPath}}", id).Output()
 	if err != nil {
@@ -141,8 +122,6 @@ func isDockerJSONLogPath(logPath string) bool {
 	return strings.HasPrefix(cleanPath, "/var/lib/docker/containers/") &&
 		strings.HasSuffix(cleanPath, "-json.log")
 }
-
-
 
 func dockerLogs(ctx context.Context, binary, id string, tail int, follow bool, timestamps bool) (io.ReadCloser, error) {
 	args := []string{"logs"}

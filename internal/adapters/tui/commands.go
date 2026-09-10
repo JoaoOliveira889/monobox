@@ -6,6 +6,7 @@ import (
 	"io"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -112,7 +113,12 @@ func inspectCmd(p domain.ContainerProvider, containerID string) tea.Cmd {
 
 func openBrowserCmd(port string) tea.Cmd {
 	return func() tea.Msg {
-		url := "http://localhost:" + port
+		portNum, err := strconv.Atoi(port)
+		if err != nil || portNum < 1 || portNum > 65535 {
+			logging.Error("invalid port for browser", "port", port)
+			return nil
+		}
+		url := "http://localhost:" + strconv.Itoa(portNum)
 		var cmd *exec.Cmd
 		switch runtime.GOOS {
 		case "darwin":
@@ -178,7 +184,7 @@ func newLogScanner(r io.Reader) *bufio.Scanner {
 }
 
 func splashTickCmd() tea.Cmd {
-	return tea.Tick(90*time.Millisecond, func(time.Time) tea.Msg {
+	return tea.Tick(splashTickInterval, func(time.Time) tea.Msg {
 		return splashTickMsg{}
 	})
 }

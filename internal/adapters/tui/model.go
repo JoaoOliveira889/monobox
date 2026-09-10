@@ -20,19 +20,20 @@ import (
 	"github.com/JoaoOliveira889/monobox/internal/pkg/ui"
 )
 
-var Version = "0.0.6"
+var Version = "0.0.7"
 
 const (
 	minTerminalWidth  = 40
 	minTerminalHeight = 10
-	footerOverhead    = 4
+	footerOverhead    = 3
 
 	logTailLines    = 100
 	logLineLimit    = 100
 	refreshInterval = 5 * time.Second
 
 	statusClearDuration = 3 * time.Second
-	splashDuration      = 1500 * time.Millisecond
+	splashMinDuration   = 650 * time.Millisecond
+	splashTickInterval  = 90 * time.Millisecond
 
 	defaultRatio      = 0.40
 	minLeftPanelRatio = 0.20
@@ -170,8 +171,10 @@ type Model struct {
 	height         int
 	leftPanelRatio float64
 
-	showSplash  bool
-	splashFrame int
+	showSplash      bool
+	splashReady     bool
+	splashStartedAt time.Time
+	splashFrame     int
 
 	statusMsg   string
 	statusMsgID int
@@ -182,6 +185,7 @@ type Model struct {
 
 	cachedTreeNodes []TreeNode
 	treeNodesDirty  bool
+	lastWheelTime   time.Time
 }
 
 func NewModel(provider domain.ContainerProvider, engineName string) Model {
@@ -236,11 +240,21 @@ func NewModel(provider domain.ContainerProvider, engineName string) Model {
 		loading:             true,
 		logFollow:           true,
 		showSplash:          true,
+		splashStartedAt:     time.Now(),
 		envMaskSecrets:      true,
 		expandedProjects:    make(map[string]bool),
 		statsHistory:        make(map[string]*StatsHistory),
 		inspectDetailsCache: make(map[string]*domain.ContainerInspectDetails),
 		treeNodesDirty:      true,
+	}
+}
+
+func (m *Model) maybeHideSplash() {
+	if !m.showSplash || !m.splashReady {
+		return
+	}
+	if time.Since(m.splashStartedAt) >= splashMinDuration {
+		m.showSplash = false
 	}
 }
 
@@ -318,18 +332,22 @@ func (m *Model) VisibleTreeNodes() []TreeNode {
 		return m.cachedTreeNodes
 	}
 
-	filtered := m.FilteredContainers()
-	if len(filtered) == 0 {
+	query := strings.ToLower(strings.TrimSpace(m.filterQuery))
+	if len(m.containers) == 0 {
 		m.cachedTreeNodes = nil
 		m.treeNodesDirty = false
 		return nil
 	}
 
-	projectContainers := make(map[string][]containerItem)
+	projectContainers := make(map[string][]*containerItem)
 	var projectOrder []string
-	var standalone []containerItem
+	var standalone []*containerItem
 
-	for _, item := range filtered {
+	for i := range m.containers {
+		item := &m.containers[i]
+		if query != "" && !matchesContainer(item.Container, query) {
+			continue
+		}
 		proj := item.ComposeProject
 		if proj != "" {
 			if _, exists := projectContainers[proj]; !exists {
@@ -339,6 +357,12 @@ func (m *Model) VisibleTreeNodes() []TreeNode {
 		} else {
 			standalone = append(standalone, item)
 		}
+	}
+
+	if len(projectContainers) == 0 && len(standalone) == 0 {
+		m.cachedTreeNodes = nil
+		m.treeNodesDirty = false
+		return nil
 	}
 
 	sort.Strings(projectOrder)
@@ -368,11 +392,10 @@ func (m *Model) VisibleTreeNodes() []TreeNode {
 
 		if isExpanded {
 			for i, c := range items {
-				cCopy := c
 				nodes = append(nodes, TreeNode{
 					Type:          NodeContainerItem,
 					ProjectName:   proj,
-					Container:     &cCopy,
+					Container:     c,
 					IsLastInGroup: i == len(items)-1,
 				})
 			}
@@ -380,11 +403,10 @@ func (m *Model) VisibleTreeNodes() []TreeNode {
 	}
 
 	for _, c := range standalone {
-		cCopy := c
 		nodes = append(nodes, TreeNode{
 			Type:        NodeContainerItem,
 			ProjectName: "",
-			Container:   &cCopy,
+			Container:   c,
 		})
 	}
 
@@ -771,11 +793,11 @@ func (m *Model) ApplyStats(statsMap map[string]domain.ContainerStats) {
 			}
 		}
 	}
-	m.invalidateTreeNodes()
 }
 
 func (m *Model) ApplyContainersLoaded(list []domain.Container) {
 	m.showSplash = false
+	m.splashReady = true
 	m.loading = false
 	var prevID string
 	var prevProj string

@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	version = "0.0.6"
+	version = "0.0.7"
 	commit  = "none"
 	date    = "unknown"
 )
@@ -41,7 +41,7 @@ func main() {
 	}
 
 	m := tui.NewModel(provider, engineName)
-	p := tea.NewProgram(&m, tea.WithAltScreen())
+	p := tea.NewProgram(&m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	if _, err := p.Run(); err != nil {
 		logging.Error("program exited with error", "error", err)

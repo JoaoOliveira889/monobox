@@ -119,7 +119,7 @@ func TestHeaderSummaryDropsMetricsBeforeContainerState(t *testing.T) {
 		{Container: domain.Container{Name: "worker", Status: domain.StatusExited}},
 	}
 
-	status := m.renderHeaderStatusBar()
+	status := m.renderHeaderStatsSummary()
 	for _, expected := range []string{"2 containers", "1 running", "1 stopped"} {
 		if !strings.Contains(status, expected) {
 			t.Errorf("header summary should preserve %q, got %q", expected, status)
@@ -130,7 +130,7 @@ func TestHeaderSummaryDropsMetricsBeforeContainerState(t *testing.T) {
 	}
 }
 
-func TestSelectedContainerRowUsesOneBackgroundSpan(t *testing.T) {
+func TestSelectedContainerRowDoesNotApplyABackground(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
 
@@ -146,8 +146,11 @@ func TestSelectedContainerRowUsesOneBackgroundSpan(t *testing.T) {
 		}},
 	}, 48)
 
-	if spans := strings.Count(row, "\x1b["); spans > 2 {
-		t.Errorf("selected row has %d ANSI spans, want one continuous styled row", spans)
+	if strings.Contains(row, ";48;") {
+		t.Errorf("selected row should not render a background color, got %q", row)
+	}
+	if !strings.Contains(row, "▶") {
+		t.Errorf("selected row should contain pointer cursor '▶', got %q", row)
 	}
 }
 
