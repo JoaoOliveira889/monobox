@@ -86,11 +86,11 @@ func (m *Model) handleResize(msg tea.WindowSizeMsg) tea.Cmd {
 		bodyHeight = 5
 	}
 
-	listInnerW := lpW - 3
+	listInnerW := lpW - 2
 	if listInnerW < 0 {
 		listInnerW = 0
 	}
-	logsInnerW := rpW - 4
+	logsInnerW := rpW - 2
 	if logsInnerW < 0 {
 		logsInnerW = 0
 	}

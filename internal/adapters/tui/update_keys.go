@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -81,7 +82,9 @@ func (m *Model) handleKeys(msg tea.KeyMsg) tea.Cmd {
 
 	if matchesKey(msg, keys.Help...) {
 		m.showHelp = true
-		return nil
+		m.helpSearchInput.Reset()
+		m.helpViewport.GotoTop()
+		return m.helpSearchInput.Focus()
 	}
 
 	if matchesKey(msg, keys.EnvModal...) {
@@ -316,6 +319,7 @@ func (m *Model) handleListKeys(msg tea.KeyMsg) tea.Cmd {
 	case matchesKey(msg, keys.Filter...):
 		m.filtering = true
 		m.filterInput.Focus()
+		m.refreshListViewport()
 		return textinput.Blink
 
 	case matchesKey(msg, keys.Prune...):
@@ -773,21 +777,103 @@ func (m *Model) markContainerLoading(index int) {
 	}
 }
 
-func (m *Model) handleHelpKeys(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
-	case "esc", "q", "?":
-		m.showHelp = false
-		return nil
-	case "up", "k":
-		m.helpViewport.LineUp(1)
-	case "down", "j":
-		m.helpViewport.LineDown(1)
-	case "pgup", "ctrl+u":
-		m.helpViewport.PageUp()
-	case "pgdown", "ctrl+d":
-		m.helpViewport.PageDown()
+func isValidHelpSearchKey(msg tea.KeyMsg) bool {
+	if msg.Type == tea.KeyRunes {
+		if len(msg.Runes) == 0 {
+			return false
+		}
+		for _, r := range msg.Runes {
+			if strings.ContainsRune("[]<>;~\\`^=", r) {
+				return false
+			}
+			if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune(" -_/+.:@", r) {
+				return false
+			}
+		}
+		return true
 	}
-	return nil
+	if msg.Type == tea.KeySpace || msg.Type == tea.KeyBackspace || msg.Type == tea.KeyDelete {
+		return true
+	}
+	return false
+}
+
+func (m *Model) handleHelpKeys(msg tea.KeyMsg) tea.Cmd {
+	str := msg.String()
+	switch str {
+	case "ctrl+c":
+		m.quitting = true
+		m.cancelStream()
+		return tea.Quit
+
+	case "esc":
+		if m.helpSearchInput.Value() != "" {
+			m.helpSearchInput.Reset()
+			m.helpViewport.GotoTop()
+			return nil
+		}
+		m.showHelp = false
+		m.helpSearchInput.Blur()
+		return nil
+
+	case "?", "ctrl+p":
+		m.showHelp = false
+		m.helpSearchInput.Reset()
+		m.helpSearchInput.Blur()
+		return nil
+
+	case "enter":
+		return nil
+
+	case "up":
+		m.helpViewport.LineUp(2)
+		return nil
+
+	case "down":
+		m.helpViewport.LineDown(2)
+		return nil
+
+	case "pgup":
+		m.helpViewport.LineUp(6)
+		return nil
+
+	case "pgdown":
+		m.helpViewport.LineDown(6)
+		return nil
+
+	case "ctrl+u":
+		if m.helpSearchInput.Value() != "" {
+			m.helpSearchInput.Reset()
+			m.helpViewport.GotoTop()
+			return nil
+		}
+		m.helpViewport.LineUp(6)
+		return nil
+
+	case "ctrl+d":
+		m.helpViewport.LineDown(6)
+		return nil
+
+	case "home":
+		m.helpViewport.GotoTop()
+		return nil
+
+	case "end":
+		m.helpViewport.GotoBottom()
+		return nil
+	}
+
+	if !isValidHelpSearchKey(msg) {
+		return nil
+	}
+
+	oldVal := m.helpSearchInput.Value()
+	var cmd tea.Cmd
+	m.helpSearchInput, cmd = m.helpSearchInput.Update(msg)
+	if m.helpSearchInput.Value() != oldVal {
+		m.helpViewport.GotoTop()
+	}
+	return cmd
 }
 
 func (m *Model) startContainerOptimistic(id, name string) tea.Cmd {

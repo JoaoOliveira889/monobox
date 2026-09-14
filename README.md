@@ -4,11 +4,11 @@
   <a href="https://github.com/JoaoOliveira889/monobox/releases/latest"><img src="https://img.shields.io/github/v/release/JoaoOliveira889/monobox?color=7aa2f7&label=tag&logo=github&style=flat-square" alt="Latest Tag"></a>
   <a href="https://github.com/JoaoOliveira889/monobox/releases/latest"><img src="https://img.shields.io/github/downloads/JoaoOliveira889/monobox/total?color=9ece6a&label=downloads&logo=github&style=flat-square" alt="Total Downloads"></a>
   <a href="https://goreportcard.com/report/github.com/JoaoOliveira889/monobox"><img src="https://goreportcard.com/badge/github.com/JoaoOliveira889/monobox?style=flat-square" alt="Go Report Card"></a>
-  <a href="https://github.com/JoaoOliveira889/homebrew-tap"><img src="https://img.shields.io/badge/homebrew-v0.0.7-b8ff3d?logo=homebrew&style=flat-square" alt="Homebrew Version"></a>
+  <a href="https://github.com/JoaoOliveira889/homebrew-tap"><img src="https://img.shields.io/badge/homebrew-v0.0.8-b8ff3d?logo=homebrew&style=flat-square" alt="Homebrew Version"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/JoaoOliveira889/monobox"><strong>MonoBox v0.0.7 · JoaoOliveira889/monobox</strong></a>
+  <a href="https://github.com/JoaoOliveira889/monobox"><strong>MonoBox v0.0.8 · JoaoOliveira889/monobox</strong></a>
 </p>
 
 **Terminal UI for Docker and Podman containers.** A TUI tool that lists all your containers with live status, log streaming, and one-key lifecycle actions — with confirmation guards for every mutating command.
@@ -56,7 +56,7 @@ Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Lip Gloss]
 | `S` | In-app Settings Editor modal |
 | `P` | System Prune modal |
 | `T` | Interactive Theme Menu modal |
-| `?` / `Ctrl+P` | Shortcuts Help Overlay modal |
+| `?` / `Ctrl+P` | Shortcuts Help Overlay modal (with live search filter) |
 | `q` / `Ctrl+C` | Quit |
 
 ### Container List Panel

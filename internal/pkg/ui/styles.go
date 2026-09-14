@@ -46,6 +46,7 @@ var (
 	FooterActionStyle lipgloss.Style
 	PanelTitleStyle   lipgloss.Style
 	LabelStyle        lipgloss.Style
+	InputStyle        lipgloss.Style
 )
 
 var (
@@ -320,6 +321,11 @@ func ApplyTheme(name string) {
 	LabelStyle = lipgloss.NewStyle().
 		Foreground(ColorAccent).
 		Bold(true)
+
+	InputStyle = lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(ColorHighlight).
+		Padding(0, 1)
 
 	SelectedItemStyle = lipgloss.NewStyle().
 		Foreground(ColorFg).

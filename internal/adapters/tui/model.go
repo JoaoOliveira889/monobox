@@ -20,7 +20,7 @@ import (
 	"github.com/JoaoOliveira889/monobox/internal/pkg/ui"
 )
 
-var Version = "0.0.7"
+var Version = "0.0.8"
 
 const (
 	minTerminalWidth  = 40
@@ -130,6 +130,7 @@ type Model struct {
 	inspectContent  string
 	inspectViewport viewport.Model
 	helpViewport    viewport.Model
+	helpSearchInput textinput.Model
 	envViewport     viewport.Model
 	healthViewport  viewport.Model
 	graphViewport   viewport.Model
@@ -218,6 +219,12 @@ func NewModel(provider domain.ContainerProvider, engineName string) Model {
 	tiSettings.Placeholder = "value"
 	tiSettings.CharLimit = 40
 
+	tiHelp := textinput.New()
+	tiHelp.Placeholder = "Type to filter shortcuts..."
+	tiHelp.Prompt = "🔍 "
+	tiHelp.CharLimit = 50
+	tiHelp.Width = 26
+
 	return Model{
 		provider:            provider,
 		engine:              engineName,
@@ -230,6 +237,7 @@ func NewModel(provider domain.ContainerProvider, engineName string) Model {
 		filterInput:         ti,
 		logSearchInput:      tiSearch,
 		settingsInput:       tiSettings,
+		helpSearchInput:     tiHelp,
 		logViewport:         viewport.New(0, 0),
 		listViewport:        viewport.New(0, 0),
 		inspectViewport:     viewport.New(0, 0),
@@ -501,7 +509,29 @@ func (m *Model) spinnerView() string {
 	return spinnerFrames[m.splashFrame%len(spinnerFrames)]
 }
 
+func (m *Model) updateListViewportHeight() {
+	headerHeight := 2
+	footerHeight := 1
+	bodyHeight := m.height - headerHeight - footerHeight
+	if bodyHeight < 5 {
+		bodyHeight = 5
+	}
+	panelHeight := bodyHeight - 1
+	innerHeight := panelHeight - 1
+	if innerHeight < 0 {
+		innerHeight = 0
+	}
+	listHeight := innerHeight
+	if m.filtering || m.filterQuery != "" {
+		listHeight = max(0, innerHeight-1)
+	}
+	if listHeight > 0 {
+		m.listViewport.Height = listHeight
+	}
+}
+
 func (m *Model) refreshListViewport() {
+	m.updateListViewportHeight()
 	m.listViewport.SetContent(m.renderContainerListContent())
 	m.ensureSelectedContainerVisible()
 }

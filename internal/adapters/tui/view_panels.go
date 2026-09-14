@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/JoaoOliveira889/monobox/internal/domain"
 	"github.com/JoaoOliveira889/monobox/internal/pkg/ui"
@@ -27,9 +28,8 @@ func (m *Model) renderTitledPanel(width, height int, title, content string, acti
 		maxTitleWidth = 5
 	}
 	truncatedTitle := title
-	titleRunes := []rune(title)
-	if len(titleRunes) > maxTitleWidth {
-		truncatedTitle = string(titleRunes[:maxTitleWidth-3]) + "..."
+	if ansi.StringWidth(title) > maxTitleWidth {
+		truncatedTitle = ansi.Truncate(title, maxTitleWidth, "...")
 	}
 
 	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
@@ -41,7 +41,7 @@ func (m *Model) renderTitledPanel(width, height int, title, content string, acti
 		titleStyled = ui.SubtleStyle.Render(truncatedTitle)
 	}
 
-	titleLen := lipgloss.Width(truncatedTitle)
+	titleLen := ansi.StringWidth(truncatedTitle)
 	repeatCount := width - titleLen - 3
 	if repeatCount < 0 {
 		repeatCount = 0
@@ -51,25 +51,26 @@ func (m *Model) renderTitledPanel(width, height int, title, content string, acti
 		titleStyled +
 		borderStyle.Render(strings.Repeat(border.Top, repeatCount)+border.TopRight)
 
+	panelHeight := height - 1
+	if panelHeight < 1 {
+		panelHeight = 1
+	}
+	innerHeight := panelHeight - 1
+	if innerHeight < 0 {
+		innerHeight = 0
+	}
 	innerWidth := width - 2
 	if innerWidth < 0 {
 		innerWidth = 0
 	}
-	innerHeight := height - 2
-	if innerHeight < 0 {
-		innerHeight = 0
-	}
 
-	if innerWidth > 0 {
-		content = truncateLineWidths(content, innerWidth)
-	}
-	content = clampLines(content, innerHeight)
+	content = clipToBox(content, innerWidth, innerHeight)
 
 	panelStyle := lipgloss.NewStyle().
 		Border(border, false, true, true, true).
 		BorderForeground(borderColor).
-		Width(innerWidth).
-		Height(innerHeight)
+		Width(width).
+		Height(panelHeight)
 
 	panel := panelStyle.Render(content)
 	return lipgloss.JoinVertical(lipgloss.Left, topLine, panel)
@@ -88,7 +89,13 @@ func (m *Model) renderContainerList(width, height int) string {
 	}
 
 	if m.filtering || m.filterQuery != "" {
-		m.filterInput.Width = width - 4
+		innerWidth := width - 2
+		promptW := lipgloss.Width(m.filterInput.Prompt)
+		inputW := innerWidth - 2 - promptW
+		if inputW < 5 {
+			inputW = 5
+		}
+		m.filterInput.Width = inputW
 		filterView := m.filterInput.View()
 		if m.filtering {
 			filterView = lipgloss.NewStyle().Foreground(ui.ColorHighlight).Bold(true).Render(filterView)
@@ -775,11 +782,20 @@ func clampLines(s string, maxLines int) string {
 	return strings.Join(lines[:maxLines], "\n")
 }
 
-func truncateLineWidths(s string, maxWidth int) string {
-	lines := strings.Split(s, "\n")
+// clipToBox fits rendered content into an exact width and height using ANSI-aware
+// truncation so styling, glyphs, and borders are never corrupted.
+func clipToBox(content string, width, height int) string {
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+
+	lines := strings.Split(content, "\n")
+	if len(lines) > height {
+		lines = lines[:height]
+	}
 	for i, line := range lines {
-		if lipgloss.Width(line) > maxWidth {
-			lines[i] = truncateRunes(line, maxWidth-1) + "…"
+		if ansi.StringWidth(line) > width {
+			lines[i] = ansi.Truncate(line, width, "…")
 		}
 	}
 	return strings.Join(lines, "\n")
